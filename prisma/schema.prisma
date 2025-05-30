@@ -1,0 +1,236 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// User model - untuk menyimpan data user
+model User {
+  id              String          @id @default(auto()) @map("_id") @db.ObjectId
+  username        String          @unique
+  email           String          @unique
+  password        String
+  first_name      String?
+  last_name       String?
+  image           String?
+  bio             String?
+  gender          String?
+  location        String?
+  phone           String?
+  jobs            String?
+  marriage_status String?
+  desc            String?
+  isOnline        Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Relations
+  sentFriendRequests     FriendRequest[] @relation("SentRequests")
+  receivedFriendRequests FriendRequest[] @relation("ReceivedRequests")
+  friendships1           Friendship[]    @relation("User1Friendships")
+  friendships2           Friendship[]    @relation("User2Friendships")
+
+  // Chat relations
+  chatMembers  ChatMember[]
+  sentMessages Message[]     @relation("MessageSender")
+  messageReads MessageRead[]
+
+  // Relasi Call
+  initiatedCalls   Call[]            @relation("CallInitiator")
+  callParticipants CallParticipant[] @relation("CallParticipant")
+
+  @@map("users")
+}
+
+// Friend Request model - untuk permintaan pertemanan
+model FriendRequest {
+  id         String              @id @default(auto()) @map("_id") @db.ObjectId
+  senderId   String              @db.ObjectId
+  receiverId String              @db.ObjectId
+  status     FriendRequestStatus @default(pending)
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  // Relations
+  sender   User @relation("SentRequests", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("ReceivedRequests", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@map("friend_requests")
+}
+
+// Friendship model - untuk relasi pertemanan yang sudah diterima
+model Friendship {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  user1Id   String   @db.ObjectId
+  user2Id   String   @db.ObjectId
+  createdAt DateTime @default(now())
+
+  // Relations
+  user1 User @relation("User1Friendships", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2 User @relation("User2Friendships", fields: [user2Id], references: [id], onDelete: Cascade)
+
+  @@unique([user1Id, user2Id])
+  @@map("friendships")
+}
+
+// Chat model - untuk room chat (private dan group)
+model Chat {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String? // Untuk group chat
+  description String? // Untuk group chat
+  icon        String? // Untuk group chat
+  type        ChatType @default(private)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  members  ChatMember[]
+  messages Message[]
+  calls    Call[]
+
+  @@map("chats")
+}
+
+// Chat Member model - untuk anggota dalam chat
+model ChatMember {
+  id         String         @id @default(auto()) @map("_id") @db.ObjectId
+  chatId     String         @db.ObjectId
+  userId     String         @db.ObjectId
+  role       ChatMemberRole @default(member)
+  isArchived Boolean        @default(false)
+  joinedAt   DateTime       @default(now())
+  lastReadAt DateTime?
+  archivedAt DateTime?
+
+  // Relations
+  chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId])
+  @@map("chat_members")
+}
+
+// Message model - untuk pesan dalam chat
+model Message {
+  id          String      @id @default(auto()) @map("_id") @db.ObjectId
+  chatId      String      @db.ObjectId
+  senderId    String      @db.ObjectId
+  content     String?
+  messageType MessageType @default(text)
+  fileUrl     String? // Untuk file, gambar, audio, video
+  fileName    String?
+  fileSize    Int?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relations
+  chat   Chat          @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender User          @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  reads  MessageRead[]
+
+  @@map("messages")
+}
+
+// Message Read model - untuk tracking read status
+model MessageRead {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  messageId String   @db.ObjectId
+  userId    String   @db.ObjectId
+  readAt    DateTime @default(now())
+
+  // Relations
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@map("message_reads")
+}
+
+// Call model - untuk voice/video call
+model Call {
+  id          String     @id @default(auto()) @map("_id") @db.ObjectId
+  chatId      String     @db.ObjectId
+  initiatorId String     @db.ObjectId
+  type        CallType   @default(voice)
+  status      CallStatus @default(initiated)
+  startedAt   DateTime   @default(now())
+  endedAt     DateTime?
+  duration    Int? // dalam detik
+
+  // Relations
+  chat         Chat              @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  initiator    User              @relation("CallInitiator", fields: [initiatorId], references: [id], onDelete: Cascade)
+  participants CallParticipant[]
+
+  @@map("calls")
+}
+
+// Call Participant model - untuk peserta call
+model CallParticipant {
+  id       String                @id @default(auto()) @map("_id") @db.ObjectId
+  callId   String                @db.ObjectId
+  userId   String                @db.ObjectId
+  status   CallParticipantStatus @default(invited)
+  joinedAt DateTime?
+  leftAt   DateTime?
+
+  // Relations
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+  user User @relation("CallParticipant", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([callId, userId])
+  @@map("call_participants")
+}
+
+// Enums
+enum FriendRequestStatus {
+  pending
+  accepted
+  rejected
+  cancelled
+}
+
+enum ChatType {
+  private
+  group
+}
+
+enum ChatMemberRole {
+  admin
+  member
+}
+
+enum MessageType {
+  text
+  image
+  location
+}
+
+enum CallType {
+  voice
+  video
+}
+
+enum CallStatus {
+  initiated
+  ringing
+  ongoing
+  ended
+  missed
+  rejected
+}
+
+enum CallParticipantStatus {
+  invited
+  joined
+  left
+  rejected
+}
