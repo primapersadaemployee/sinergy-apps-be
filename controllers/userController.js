@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { v2 as cloudinary } from "cloudinary";
 import { getIO } from "../socket.js";
+import fs from "fs";
 
 // Get User Profile
 const getUserProfile = async (req, res) => {
@@ -75,22 +76,21 @@ cloudinary.config({
 });
 
 // Helper function upload image to cloudinary
-const uploadToCloudinary = async (file) => {
+const uploadToCloudinary = async (filePath) => {
   try {
-    // Convert buffer to base64
-    const base64String = `data:${file.mimetype};base64,${file.buffer.toString(
-      "base64"
-    )}`;
-
-    // Upload to Cloudinary
-    const result = await cloudinary.uploader.upload(base64String, {
+    const result = await cloudinary.uploader.upload(filePath, {
       folder: "chatting-apps",
       use_filename: true,
+      transformation: [
+        { width: 500, height: 500, crop: "limit" },
+        { quality: "auto" },
+        { fetch_format: "auto" },
+      ],
     });
 
     return result.secure_url;
   } catch (error) {
-    console.error("Error uploading to Cloudinary:", error);
+    console.error("Cloudinary Upload Error:", error);
     throw new Error("Image upload failed");
   }
 };
@@ -113,25 +113,28 @@ const updateUserProfile = async (req, res) => {
     } = req.body;
     const image = req.file;
 
-    // Check image user in cloudinary
     const userImageOld = await prisma.user.findUnique({
       where: { id: userId },
       select: { image: true },
     });
 
-    // Upload image to cloudinary if new image is provided
     let imageUrl = null;
     if (image) {
+      // Delete old image from cloudinary
       if (userImageOld.image !== null) {
         const publicId = userImageOld.image
           .split("/")
           .slice(-2)
           .join("/")
           .replace(/\.[^.]+$/, "");
-        await cloudinary.uploader.destroy(publicId);
+        cloudinary.uploader.destroy(publicId); 
       }
 
-      imageUrl = await uploadToCloudinary(image);
+      // Upload to cloudinary
+      imageUrl = await uploadToCloudinary(image.path);
+
+      // Delete file local after upload
+      fs.unlinkSync(image.path);
     }
 
     // Update user profile
@@ -151,11 +154,12 @@ const updateUserProfile = async (req, res) => {
         location,
       },
     });
+
     return res
       .status(200)
       .json({ success: true, message: "Success update user profile" });
   } catch (error) {
-    console.log(error);
+    console.error(error);
     return res.status(500).json({
       success: false,
       message: "Error updating profile",

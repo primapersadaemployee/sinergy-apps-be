@@ -5,6 +5,7 @@ import { createServer } from "http";
 import userRouter from "./routes/userRoute.js";
 import chatRouter from "./routes/chatRoute.js";
 import { initSocket } from "./socket.js";
+import setupSwagger from "./swagger.js";
 
 // App Config
 const app = express();
@@ -23,6 +24,7 @@ app.use(cors());
 // API Endpoints
 app.use("/api/user", userRouter);
 app.use("/api/chat", chatRouter);
+setupSwagger(app);
 
 app.get("/", (req, res) => {
   res.send("API Working!");

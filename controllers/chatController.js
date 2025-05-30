@@ -1,9 +1,20 @@
 import { prisma } from "../lib/prisma.js";
 import { getIO } from "../socket.js";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc.js";
+import timezone from "dayjs/plugin/timezone.js";
+import isToday from "dayjs/plugin/isToday.js";
+import isYesterday from "dayjs/plugin/isYesterday.js";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+dayjs.extend(isToday);
+dayjs.extend(isYesterday);
 
 // Get all chats friends for the current user
 const getAllChatFriends = async (req, res) => {
   const userId = req.user;
+  const { timezone = 'Asia/Jakarta' } = req.query;
 
   try {
     const chats = await prisma.chat.findMany({
@@ -51,19 +62,25 @@ const getAllChatFriends = async (req, res) => {
     const formattedChats = chats.map(chat => {
       const otherMembers = chat.members.filter(member => member.userId !== userId);
       const lastMessage = chat.messages[0];
+      const created = dayjs(lastMessage.createdAt).tz(timezone);
+      let time = '';
+      if (created.isToday()) {
+        time = created.format('HH:mm');
+      } else if (created.isYesterday()) {
+        time = 'Kemarin';
+      } else {
+        time = created.format('DD-MM-YYYY');
+      }
 
       return {
         id: chat.id,
         type: chat.type,
-        name: chat.type === 'private' 
-          ? otherMembers[0]?.user.username 
-          : chat.name,
-        image: chat.type === 'private'
-          ? otherMembers[0]?.user.image
-          : chat.icon,
+        name: otherMembers[0]?.user.username,
+        image: otherMembers[0]?.user.image,
         lastMessage: lastMessage ? {
           content: lastMessage.content,
           sender: lastMessage.sender.username,
+          time: time,
           createdAt: lastMessage.createdAt,
         } : null,
         // members: chat.members.map(member => ({
@@ -93,6 +110,7 @@ const getAllChatFriends = async (req, res) => {
 // Get all chats group
 const getAllChatGroups = async (req, res) => {
   const userId = req.user;
+  const { timezone = 'Asia/Jakarta' } = req.query;
 
   try {
     const chats = await prisma.chat.findMany({
@@ -138,18 +156,26 @@ const getAllChatGroups = async (req, res) => {
     });
 
     const formattedChats = chats.map(chat => {
-      const otherMembers = chat.members.filter(member => member.userId !== userId);
       const lastMessage = chat.messages[0];
+      const created = dayjs(lastMessage.createdAt).tz(timezone);
+      let time = '';
+      if (created.isToday()) {
+        time = created.format('HH:mm');
+      } else if (created.isYesterday()) {
+        time = 'Kemarin';
+      } else {
+        time = created.format('DD-MM-YYYY');
+      }
 
       return {
         id: chat.id,
         type: chat.type,
         groupName: chat.name,
-        name: otherMembers[0]?.user.username,
         image: chat.icon,
         lastMessage: lastMessage ? {
           content: lastMessage.content,
           sender: lastMessage.sender.username,
+          time: time,
           createdAt: lastMessage.createdAt,
         } : null,
         // members: chat.members.map(member => ({
@@ -179,6 +205,7 @@ const getAllChatGroups = async (req, res) => {
 // Get archived chats
 const getArchivedChats = async (req, res) => {
   const userId = req.user;
+  const { timezone = 'Asia/Jakarta' } = req.query;
 
   try {
     const archivedChats = await prisma.chat.findMany({
@@ -222,10 +249,21 @@ const getArchivedChats = async (req, res) => {
       },
     });
 
-    const formattedChats = archivedChats.map(chat => ({
-      id: chat.id,
-      type: chat.type,
-      name: chat.type === 'private'
+    const formattedChats = archivedChats.map(chat => {
+      const created = dayjs(chat.messages[0].createdAt).tz(timezone);
+      let time = '';
+      if (created.isToday()) {
+        time = created.format('HH:mm');
+      } else if (created.isYesterday()) {
+        time = 'Kemarin';
+      } else {
+        time = created.format('DD-MM-YYYY');
+      }
+
+      return {
+        id: chat.id,
+        type: chat.type,
+        name: chat.type === 'private'
         ? chat.members.find(member => member.userId !== userId)?.user.username
         : chat.name,
       image: chat.type === 'private'
@@ -234,9 +272,11 @@ const getArchivedChats = async (req, res) => {
       lastMessage: chat.messages[0] ? {
         content: chat.messages[0].content,
         sender: chat.messages[0].sender.username,
+        time: time,
         createdAt: chat.messages[0].createdAt,
       } : null,
-    }));
+      };
+    });
 
     return res.status(200).json({
       success: true,
@@ -424,6 +464,7 @@ const getListGroupChat = async (req, res) => {
         const groupChat = await prisma.chat.findUnique({
             where: {
                 id: groupId,
+                type: 'group',
                 members: {
                     some: {
                         userId: userId,
@@ -544,15 +585,12 @@ const addGroupMembers = async (req, res) => {
 const getChatMessages = async (req, res) => {
   const userId = req.user;
   const { chatId } = req.params;
-  const { page = 1, limit = 50 } = req.query;
+  const { page = 1, limit = 50, timezone = 'Asia/Jakarta' } = req.query; 
 
   try {
-    // Check if user is a member of the chat
+    // Cek keanggotaan
     const isMember = await prisma.chatMember.findFirst({
-      where: {
-        chatId,
-        userId,
-      },
+      where: { chatId, userId },
     });
 
     if (!isMember) {
@@ -562,64 +600,74 @@ const getChatMessages = async (req, res) => {
       });
     }
 
-    // Get messages with pagination
+    // Ambil pesan
     const messages = await prisma.message.findMany({
-      where: {
-        chatId,
-      },
+      where: { chatId },
       include: {
-        sender: {
-          select: {
-            id: true,
-            username: true,
-            image: true,
-          },
-        },
-        reads: {
-          select: {
-            userId: true,
-            readAt: true,
-          },
-        },
+        sender: { select: { id: true, username: true, image: true } },
+        reads: { select: { userId: true, readAt: true } },
       },
-      orderBy: {
-        createdAt: 'desc',
-      },
+      orderBy: { createdAt: 'desc' },
       skip: (page - 1) * limit,
       take: limit,
     });
 
-    // Update last read timestamp
-    await prisma.chatMember.update({
-      where: {
-        chatId_userId: {
-          chatId,
-          userId,
+    // Format pesan
+    const formattedMessages = messages.map(msg => {
+      const created = dayjs(msg.createdAt).tz(timezone);
+      return {
+        id: msg.id,
+        content: msg.content,
+        messageType: msg.messageType,
+        fileUrl: msg.fileUrl,
+        fileName: msg.fileName,
+        fileSize: msg.fileSize,
+        sender: {
+          id: msg.sender.id,
+          username: msg.sender.username,
+          image: msg.sender.image,
         },
-      },
-      data: {
-        lastReadAt: new Date(),
-      },
+        reads: msg.reads,
+        date: created.format('DD-MM-YYYY'),
+        time: created.format('HH:mm'),
+        createdAt: msg.createdAt,
+      };
+    });
+
+    // Grouping berdasarkan tanggal
+    const grouped = {};
+    formattedMessages.forEach(msg => {
+      const created = dayjs(msg.createdAt).tz(timezone);
+      let label = created.format('DD-MM-YYYY');
+
+      if (created.isToday()) label = 'Hari Ini';
+      else if (created.isYesterday()) label = 'Kemarin';
+
+      if (!grouped[label]) {
+        grouped[label] = {
+          label,
+          date: created.format('YYYY-MM-DD'),
+          messages: [],
+        };
+      }
+
+      grouped[label].messages.push(msg);
+    });
+
+    const groupedArray = Object.values(grouped).sort((a, b) => {
+      return dayjs(b.date).valueOf() - dayjs(a.date).valueOf();
+    });
+
+    // Update last read
+    await prisma.chatMember.update({
+      where: { chatId_userId: { chatId, userId } },
+      data: { lastReadAt: new Date() },
     });
 
     return res.status(200).json({
       success: true,
       message: "Successfully retrieved chat messages",
-      data: messages.map(message => ({
-        id: message.id,
-        content: message.content,
-        messageType: message.messageType,
-        fileUrl: message.fileUrl,
-        fileName: message.fileName,
-        fileSize: message.fileSize,
-        sender: {
-          id: message.sender.id,
-          username: message.sender.username,
-          image: message.sender.image,
-        },
-        reads: message.reads,
-        createdAt: message.createdAt,
-      })),
+      data: groupedArray,
     });
   } catch (error) {
     console.error(error);
@@ -634,7 +682,7 @@ const getChatMessages = async (req, res) => {
 // Send message
 const sendMessage = async (req, res) => {
   const userId = req.user;
-  const { chatId } = req.params;
+  const { chatId, timezone = 'Asia/Jakarta' } = req.params;
   const { content, messageType = 'text' } = req.body;
 
   try {
@@ -705,7 +753,7 @@ const sendMessage = async (req, res) => {
             username: message.sender.username,
             image: message.sender.image,
           },
-          createdAt: message.createdAt,
+          time: dayjs(message.createdAt).tz(timezone).format('HH:mm'),
         },
       });
     });
@@ -722,7 +770,7 @@ const sendMessage = async (req, res) => {
           username: message.sender.username,
           image: message.sender.image,
         },
-        createdAt: message.createdAt,
+        time: dayjs(message.createdAt).tz(timezone).format('HH:mm'),
       },
     });
   } catch (error) {

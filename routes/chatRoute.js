@@ -31,7 +31,6 @@ chatRouter.post("/group", createGroupChat);
 chatRouter.post("/group/:chatId/members", addGroupMembers);
 chatRouter.get("/group/:groupId", getListGroupChat);
 
-
 // Message routes
 chatRouter.get("/:chatId/messages", getChatMessages);
 chatRouter.post("/:chatId/messages", sendMessage);
