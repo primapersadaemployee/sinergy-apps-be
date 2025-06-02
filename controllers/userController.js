@@ -1,7 +1,14 @@
 import { prisma } from "../lib/prisma.js";
 import { v2 as cloudinary } from "cloudinary";
-import { getIO } from "../socket.js";
 import fs from "fs";
+import { userSocketMap } from "../socket.js";
+import { io } from "../index.js";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc.js";
+import timezone from "dayjs/plugin/timezone.js";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 // Get User Profile
 const getUserProfile = async (req, res) => {
@@ -32,7 +39,9 @@ const getUserProfile = async (req, res) => {
     });
   } catch (error) {
     console.log(error);
-    return res.status(500).json({ success: false, message: "Error get profile" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Error get profile" });
   }
 };
 
@@ -127,7 +136,7 @@ const updateUserProfile = async (req, res) => {
           .slice(-2)
           .join("/")
           .replace(/\.[^.]+$/, "");
-        cloudinary.uploader.destroy(publicId); 
+        cloudinary.uploader.destroy(publicId);
       }
 
       // Upload to cloudinary
@@ -177,10 +186,7 @@ const sendFriendRequest = async (req, res) => {
     // Check if the user is already a friend
     const existingFriendship = await prisma.friendRequest.findFirst({
       where: {
-        OR: [
-          { senderId: userId, receiverId },
-          // { senderId: receiverId, receiverId: userId },
-        ],
+        OR: [{ senderId: userId, receiverId }],
       },
       select: {
         status: true,
@@ -209,17 +215,22 @@ const sendFriendRequest = async (req, res) => {
       },
     });
 
-    // Emit socket event for real-time notification
-    const io = getIO();
-    io.to(`user_${receiverId}`).emit("friend_request_received", {
-      requestId: friendRequest.id,
-      userId: userId,
-      username: friendRequest.sender.username,
-    });
+    // Send notification realtime
+    const receiverSocketId = userSocketMap.get(receiverId);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("friendRequest", {
+        requestId: friendRequest.id,
+        senderId: userId,
+        username: friendRequest.sender.username,
+      });
+    }
 
     return res.status(200).json({
       success: true,
       message: "Success send friend request",
+      data: {
+        requestId: friendRequest.id,
+      },
     });
   } catch (error) {
     console.log(error);
@@ -234,6 +245,7 @@ const sendFriendRequest = async (req, res) => {
 // Check friend request
 const checkFriendRequest = async (req, res) => {
   const userId = req.user;
+  const { timezone = "Asia/Jakarta" } = req.query;
 
   try {
     const friendRequests = await prisma.friendRequest.findMany({
@@ -252,11 +264,9 @@ const checkFriendRequest = async (req, res) => {
       },
     });
 
-
     const formattedFriendRequests = friendRequests.map((request) => {
-      const createdAt = new Date(request.createdAt);
-      const date = createdAt.toISOString().split("T")[0]; // YYYY-MM-DD
-      const time = createdAt.toTimeString().split(" ")[0]; // HH:mm:ss
+      const date = dayjs(request.createdAt).tz(timezone).format("DD-MM-YYYY");
+      const time = dayjs(request.createdAt).tz(timezone).format("HH:mm:ss");
 
       return {
         id: request.id,
@@ -326,21 +336,6 @@ const acceptRejectFriendRequest = async (req, res) => {
           user1Id: friendRequest.senderId,
           user2Id: friendRequest.receiverId,
         },
-      });
-    }
-
-    // Emit socket event for real-time notification
-    const io = getIO();
-    io.to(`user_${friendRequest.senderId}`).emit("friend_request_updated", {
-      requestId,
-      status,
-      userId: userId,
-      username: friendRequest.receiver.username,
-    });
-
-    if (status === "rejected") {
-      await prisma.friendRequest.delete({
-        where: { id: requestId },
       });
     }
 

@@ -1,27 +1,20 @@
 import express from "express";
 import cors from "cors";
 import "dotenv/config";
-import { createServer } from "http";
 import userRouter from "./routes/userRoute.js";
 import chatRouter from "./routes/chatRoute.js";
-import { initSocket } from "./socket.js";
 import setupSwagger from "./swagger.js";
+import { initSocket } from "./socket.js";
 
-// App Config
+// Initialize Express
 const app = express();
 const port = process.env.PORT;
 
-// Create HTTP server
-const server = createServer(app);
-
-// Initialize Socket.IO
-initSocket(server);
-
-// Middlewares
+// Middleware
 app.use(express.json());
 app.use(cors());
 
-// API Endpoints
+// Routes
 app.use("/api/user", userRouter);
 app.use("/api/chat", chatRouter);
 setupSwagger(app);
@@ -30,6 +23,12 @@ app.get("/", (req, res) => {
   res.send("API Working!");
 });
 
-server.listen(port, "0.0.0.0", () => {
-  console.log("Server running on port :", port);
+// Start the server
+const server = app.listen(port, "0.0.0.0", () => {
+  console.log(`Server is running on port :${port}`);
 });
+
+// Initialize Socket.IO
+const io = initSocket(server);
+
+export { io };

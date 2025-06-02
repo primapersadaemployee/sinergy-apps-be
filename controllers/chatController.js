@@ -1,5 +1,4 @@
 import { prisma } from "../lib/prisma.js";
-import { getIO } from "../socket.js";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc.js";
 import timezone from "dayjs/plugin/timezone.js";
@@ -14,12 +13,12 @@ dayjs.extend(isYesterday);
 // Get all chats friends for the current user
 const getAllChatFriends = async (req, res) => {
   const userId = req.user;
-  const { timezone = 'Asia/Jakarta' } = req.query;
+  const { timezone = "Asia/Jakarta" } = req.query;
 
   try {
     const chats = await prisma.chat.findMany({
       where: {
-        type: 'private',
+        type: "private",
         members: {
           some: {
             userId: userId,
@@ -41,7 +40,7 @@ const getAllChatFriends = async (req, res) => {
         },
         messages: {
           orderBy: {
-            createdAt: 'desc',
+            createdAt: "desc",
           },
           take: 1,
           include: {
@@ -55,21 +54,23 @@ const getAllChatFriends = async (req, res) => {
         },
       },
       orderBy: {
-        updatedAt: 'desc',
+        updatedAt: "desc",
       },
     });
 
-    const formattedChats = chats.map(chat => {
-      const otherMembers = chat.members.filter(member => member.userId !== userId);
+    const formattedChats = chats.map((chat) => {
+      const otherMembers = chat.members.filter(
+        (member) => member.userId !== userId
+      );
       const lastMessage = chat.messages[0];
       const created = dayjs(lastMessage.createdAt).tz(timezone);
-      let time = '';
+      let time = "";
       if (created.isToday()) {
-        time = created.format('HH:mm');
+        time = created.format("HH:mm");
       } else if (created.isYesterday()) {
-        time = 'Kemarin';
+        time = "Kemarin";
       } else {
-        time = created.format('DD-MM-YYYY');
+        time = created.format("DD-MM-YYYY");
       }
 
       return {
@@ -77,12 +78,14 @@ const getAllChatFriends = async (req, res) => {
         type: chat.type,
         name: otherMembers[0]?.user.username,
         image: otherMembers[0]?.user.image,
-        lastMessage: lastMessage ? {
-          content: lastMessage.content,
-          sender: lastMessage.sender.username,
-          time: time,
-          createdAt: lastMessage.createdAt,
-        } : null,
+        lastMessage: lastMessage
+          ? {
+              content: lastMessage.content,
+              sender: lastMessage.sender.username,
+              time: time,
+              createdAt: lastMessage.createdAt,
+            }
+          : null,
         // members: chat.members.map(member => ({
         //   userId: member.user.id,
         //   username: member.user.username,
@@ -110,12 +113,12 @@ const getAllChatFriends = async (req, res) => {
 // Get all chats group
 const getAllChatGroups = async (req, res) => {
   const userId = req.user;
-  const { timezone = 'Asia/Jakarta' } = req.query;
+  const { timezone = "Asia/Jakarta" } = req.query;
 
   try {
     const chats = await prisma.chat.findMany({
       where: {
-        type: 'group',
+        type: "group",
         members: {
           some: {
             userId: userId,
@@ -137,7 +140,7 @@ const getAllChatGroups = async (req, res) => {
         },
         messages: {
           orderBy: {
-            createdAt: 'desc',
+            createdAt: "desc",
           },
           take: 1,
           include: {
@@ -151,20 +154,20 @@ const getAllChatGroups = async (req, res) => {
         },
       },
       orderBy: {
-        updatedAt: 'desc',
+        updatedAt: "desc",
       },
     });
 
-    const formattedChats = chats.map(chat => {
+    const formattedChats = chats.map((chat) => {
       const lastMessage = chat.messages[0];
       const created = dayjs(lastMessage.createdAt).tz(timezone);
-      let time = '';
+      let time = "";
       if (created.isToday()) {
-        time = created.format('HH:mm');
+        time = created.format("HH:mm");
       } else if (created.isYesterday()) {
-        time = 'Kemarin';
+        time = "Kemarin";
       } else {
-        time = created.format('DD-MM-YYYY');
+        time = created.format("DD-MM-YYYY");
       }
 
       return {
@@ -172,12 +175,14 @@ const getAllChatGroups = async (req, res) => {
         type: chat.type,
         groupName: chat.name,
         image: chat.icon,
-        lastMessage: lastMessage ? {
-          content: lastMessage.content,
-          sender: lastMessage.sender.username,
-          time: time,
-          createdAt: lastMessage.createdAt,
-        } : null,
+        lastMessage: lastMessage
+          ? {
+              content: lastMessage.content,
+              sender: lastMessage.sender.username,
+              time: time,
+              createdAt: lastMessage.createdAt,
+            }
+          : null,
         // members: chat.members.map(member => ({
         //   userId: member.user.id,
         //   username: member.user.username,
@@ -205,7 +210,7 @@ const getAllChatGroups = async (req, res) => {
 // Get archived chats
 const getArchivedChats = async (req, res) => {
   const userId = req.user;
-  const { timezone = 'Asia/Jakarta' } = req.query;
+  const { timezone = "Asia/Jakarta" } = req.query;
 
   try {
     const archivedChats = await prisma.chat.findMany({
@@ -231,7 +236,7 @@ const getArchivedChats = async (req, res) => {
         },
         messages: {
           orderBy: {
-            createdAt: 'desc',
+            createdAt: "desc",
           },
           take: 1,
           include: {
@@ -245,36 +250,42 @@ const getArchivedChats = async (req, res) => {
         },
       },
       orderBy: {
-        updatedAt: 'desc',
+        updatedAt: "desc",
       },
     });
 
-    const formattedChats = archivedChats.map(chat => {
+    const formattedChats = archivedChats.map((chat) => {
       const created = dayjs(chat.messages[0].createdAt).tz(timezone);
-      let time = '';
+      let time = "";
       if (created.isToday()) {
-        time = created.format('HH:mm');
+        time = created.format("HH:mm");
       } else if (created.isYesterday()) {
-        time = 'Kemarin';
+        time = "Kemarin";
       } else {
-        time = created.format('DD-MM-YYYY');
+        time = created.format("DD-MM-YYYY");
       }
 
       return {
         id: chat.id,
         type: chat.type,
-        name: chat.type === 'private'
-        ? chat.members.find(member => member.userId !== userId)?.user.username
-        : chat.name,
-      image: chat.type === 'private'
-        ? chat.members.find(member => member.userId !== userId)?.user.image
-        : chat.icon,
-      lastMessage: chat.messages[0] ? {
-        content: chat.messages[0].content,
-        sender: chat.messages[0].sender.username,
-        time: time,
-        createdAt: chat.messages[0].createdAt,
-      } : null,
+        name:
+          chat.type === "private"
+            ? chat.members.find((member) => member.userId !== userId)?.user
+                .username
+            : chat.name,
+        image:
+          chat.type === "private"
+            ? chat.members.find((member) => member.userId !== userId)?.user
+                .image
+            : chat.icon,
+        lastMessage: chat.messages[0]
+          ? {
+              content: chat.messages[0].content,
+              sender: chat.messages[0].sender.username,
+              time: time,
+              createdAt: chat.messages[0].createdAt,
+            }
+          : null,
       };
     });
 
@@ -319,7 +330,7 @@ const startPrivateChat = async (req, res) => {
     // Check if a private chat already exists
     const existingChat = await prisma.chat.findFirst({
       where: {
-        type: 'private',
+        type: "private",
         AND: [
           {
             members: {
@@ -350,16 +361,16 @@ const startPrivateChat = async (req, res) => {
     // Create new private chat
     const newChat = await prisma.chat.create({
       data: {
-        type: 'private',
+        type: "private",
         members: {
           create: [
             {
               userId: userId,
-              role: 'member',
+              role: "member",
             },
             {
               userId: friendId,
-              role: 'member',
+              role: "member",
             },
           ],
         },
@@ -393,13 +404,13 @@ const createGroupChat = async (req, res) => {
     // Create group chat
     const newGroupChat = await prisma.chat.create({
       data: {
-        type: 'group',
+        type: "group",
         name,
         description,
         members: {
-          create: uniqueMemberIds.map(memberId => ({
+          create: uniqueMemberIds.map((memberId) => ({
             userId: memberId,
-            role: memberId === userId ? 'admin' : 'member',
+            role: memberId === userId ? "admin" : "member",
           })),
         },
       },
@@ -418,18 +429,6 @@ const createGroupChat = async (req, res) => {
       },
     });
 
-    // Notify all members about the new group
-    const io = getIO();
-    uniqueMemberIds.forEach(memberId => {
-      if (memberId !== userId) {
-        io.to(`user_${memberId}`).emit('new_group_chat', {
-          chatId: newGroupChat.id,
-          name: newGroupChat.name,
-          creator: userId,
-        });
-      }
-    });
-
     return res.status(201).json({
       success: true,
       message: "Group chat created successfully",
@@ -437,7 +436,7 @@ const createGroupChat = async (req, res) => {
         id: newGroupChat.id,
         name: newGroupChat.name,
         description: newGroupChat.description,
-        members: newGroupChat.members.map(member => ({
+        members: newGroupChat.members.map((member) => ({
           userId: member.user.id,
           username: member.user.username,
           image: member.user.image,
@@ -457,72 +456,70 @@ const createGroupChat = async (req, res) => {
 
 // Get list group chat
 const getListGroupChat = async (req, res) => {
-    const userId = req.user;
-    const { groupId } = req.params;
+  const userId = req.user;
+  const { groupId } = req.params;
 
-    try {
-        const groupChat = await prisma.chat.findUnique({
-            where: {
-                id: groupId,
-                type: 'group',
-                members: {
-                    some: {
-                        userId: userId,
-                        isArchived: false,
-                    }
-                }
+  try {
+    const groupChat = await prisma.chat.findUnique({
+      where: {
+        id: groupId,
+        type: "group",
+        members: {
+          some: {
+            userId: userId,
+            isArchived: false,
+          },
+        },
+      },
+      include: {
+        members: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                image: true,
+              },
             },
-            include: {
-                members: {
-                    include: {
-                        user: {
-                            select: {
-                                id: true,
-                                username: true,
-                                image: true,
-                            }
-                        }
-                    }
-                }
-            }
-        });
+          },
+        },
+      },
+    });
 
-        if (!groupChat) {
-            return res.status(404).json({
-                success: false,
-                message: "Group chat not found",
-            });
-        }
-
-        const formattedGroupChat = {
-            id: groupChat.id,
-            name: groupChat.name,
-            icon: groupChat.icon,
-            description: groupChat.description,
-            members: groupChat.members.map(member => ({
-                userId: member.user.id,
-                username: member.user.username,
-                image: member.user.image,
-                role: member.role,
-            })),
-        };
-
-        return res.status(200).json({
-            success: true,
-            message: "Successfully retrieved list group chat",
-            data: formattedGroupChat,
-        });
-        
-    } catch (error) {
-        console.error(error);
-        return res.status(500).json({
-            success: false,
-            message: "Error getting list group chat",
-            error: error.message,
-        });
+    if (!groupChat) {
+      return res.status(404).json({
+        success: false,
+        message: "Group chat not found",
+      });
     }
 
-}
+    const formattedGroupChat = {
+      id: groupChat.id,
+      name: groupChat.name,
+      icon: groupChat.icon,
+      description: groupChat.description,
+      members: groupChat.members.map((member) => ({
+        userId: member.user.id,
+        username: member.user.username,
+        image: member.user.image,
+        role: member.role,
+      })),
+    };
+
+    return res.status(200).json({
+      success: true,
+      message: "Successfully retrieved list group chat",
+      data: formattedGroupChat,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: "Error getting list group chat",
+      error: error.message,
+    });
+  }
+};
 
 // Add members to group chat
 const addGroupMembers = async (req, res) => {
@@ -536,7 +533,7 @@ const addGroupMembers = async (req, res) => {
       where: {
         chatId,
         userId,
-        role: 'admin',
+        role: "admin",
       },
     });
 
@@ -549,19 +546,11 @@ const addGroupMembers = async (req, res) => {
 
     // Add new members
     const newMembers = await prisma.chatMember.createMany({
-      data: memberIds.map(memberId => ({
+      data: memberIds.map((memberId) => ({
         chatId,
         userId: memberId,
-        role: 'member',
+        role: "member",
       })),
-    });
-
-    // Notify new members
-    const io = getIO();
-    memberIds.forEach(memberId => {
-      io.to(`user_${memberId}`).emit('added_to_group', {
-        chatId,
-      });
     });
 
     return res.status(200).json({
@@ -585,7 +574,7 @@ const addGroupMembers = async (req, res) => {
 const getChatMessages = async (req, res) => {
   const userId = req.user;
   const { chatId } = req.params;
-  const { page = 1, limit = 50, timezone = 'Asia/Jakarta' } = req.query; 
+  const { page = 1, limit = 50, timezone = "Asia/Jakarta" } = req.query;
 
   try {
     // Cek keanggotaan
@@ -607,13 +596,13 @@ const getChatMessages = async (req, res) => {
         sender: { select: { id: true, username: true, image: true } },
         reads: { select: { userId: true, readAt: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       skip: (page - 1) * limit,
       take: limit,
     });
 
     // Format pesan
-    const formattedMessages = messages.map(msg => {
+    const formattedMessages = messages.map((msg) => {
       const created = dayjs(msg.createdAt).tz(timezone);
       return {
         id: msg.id,
@@ -628,25 +617,25 @@ const getChatMessages = async (req, res) => {
           image: msg.sender.image,
         },
         reads: msg.reads,
-        date: created.format('DD-MM-YYYY'),
-        time: created.format('HH:mm'),
+        date: created.format("DD-MM-YYYY"),
+        time: created.format("HH:mm"),
         createdAt: msg.createdAt,
       };
     });
 
     // Grouping berdasarkan tanggal
     const grouped = {};
-    formattedMessages.forEach(msg => {
+    formattedMessages.forEach((msg) => {
       const created = dayjs(msg.createdAt).tz(timezone);
-      let label = created.format('DD-MM-YYYY');
+      let label = created.format("DD-MM-YYYY");
 
-      if (created.isToday()) label = 'Hari Ini';
-      else if (created.isYesterday()) label = 'Kemarin';
+      if (created.isToday()) label = "Hari Ini";
+      else if (created.isYesterday()) label = "Kemarin";
 
       if (!grouped[label]) {
         grouped[label] = {
           label,
-          date: created.format('YYYY-MM-DD'),
+          date: created.format("YYYY-MM-DD"),
           messages: [],
         };
       }
@@ -682,8 +671,8 @@ const getChatMessages = async (req, res) => {
 // Send message
 const sendMessage = async (req, res) => {
   const userId = req.user;
-  const { chatId, timezone = 'Asia/Jakarta' } = req.params;
-  const { content, messageType = 'text' } = req.body;
+  const { chatId, timezone = "Asia/Jakarta" } = req.params;
+  const { content, messageType = "text" } = req.body;
 
   try {
     // Check if user is a member of the chat
@@ -739,25 +728,6 @@ const sendMessage = async (req, res) => {
       },
     });
 
-    // Notify other members
-    const io = getIO();
-    chatMembers.forEach(member => {
-      io.to(`user_${member.userId}`).emit('new_message', {
-        chatId,
-        message: {
-          id: message.id,
-          content: message.content,
-          messageType: message.messageType,
-          sender: {
-            id: message.sender.id,
-            username: message.sender.username,
-            image: message.sender.image,
-          },
-          time: dayjs(message.createdAt).tz(timezone).format('HH:mm'),
-        },
-      });
-    });
-
     return res.status(201).json({
       success: true,
       message: "Message sent successfully",
@@ -770,7 +740,7 @@ const sendMessage = async (req, res) => {
           username: message.sender.username,
           image: message.sender.image,
         },
-        time: dayjs(message.createdAt).tz(timezone).format('HH:mm'),
+        time: dayjs(message.createdAt).tz(timezone).format("HH:mm"),
       },
     });
   } catch (error) {
@@ -820,7 +790,9 @@ const toggleArchiveChat = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: archive ? "Chat archived successfully" : "Chat unarchived successfully",
+      message: archive
+        ? "Chat archived successfully"
+        : "Chat unarchived successfully",
     });
   } catch (error) {
     console.error(error);
@@ -843,4 +815,4 @@ export {
   getChatMessages,
   sendMessage,
   toggleArchiveChat,
-}; 
+};
