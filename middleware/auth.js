@@ -19,8 +19,8 @@ const authMiddleware = async (req, res, next) => {
 
     const token = parts[1];
 
-    if (!token) {
-      return res.status(401).json({ message: "Token not found" });
+    if (!token || token === "null" || token === "undefined") {
+      return res.status(401).json({ message: "Token is missing or invalid" });
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);

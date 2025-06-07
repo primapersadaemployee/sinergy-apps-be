@@ -7,16 +7,16 @@ import {
   checkFriendRequest,
   acceptRejectFriendRequest,
   getAllFriend,
-  searchByUsername,
   recommendationFriend,
   getUserProfileByUserId,
+  searchByUsernameOrPhone,
+  deleteFriend,
 } from "../controllers/userController.js";
 import authMiddleware from "../middleware/auth.js";
 import upload from "../config/multer.js";
 import uploadSizeImage from "../middleware/uploadSizeImage.js";
 
 const userRouter = express.Router();
-
 
 /**
  * @swagger
@@ -133,9 +133,9 @@ userRouter.patch(
   acceptRejectFriendRequest
 );
 userRouter.get("/friends", authMiddleware, getAllFriend);
-userRouter.get("/friends/search", authMiddleware, searchByUsername);
+userRouter.get("/friends/search", authMiddleware, searchByUsernameOrPhone);
 userRouter.get("/friends/recommendation", authMiddleware, recommendationFriend);
+userRouter.delete("/friend/:friendId", authMiddleware, deleteFriend);
 userRouter.get("/:id", authMiddleware, getUserProfileByUserId);
-
 
 export default userRouter;

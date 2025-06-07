@@ -1,11 +1,12 @@
 import { prisma } from "../lib/prisma.js";
 import { v2 as cloudinary } from "cloudinary";
 import fs from "fs";
-import { userSocketMap } from "../socket.js";
+import { getSocketId } from "../socket.js";
 import { io } from "../index.js";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc.js";
 import timezone from "dayjs/plugin/timezone.js";
+// import { userSocketMap } from "../socket.js";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -122,6 +123,19 @@ const updateUserProfile = async (req, res) => {
     } = req.body;
     const image = req.file;
 
+    // Check if username already exists
+    const checkUsername = await prisma.user.findUnique({
+      where: {
+        username: username,
+      },
+    });
+
+    if (checkUsername) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Username already exists!" });
+    }
+
     const userImageOld = await prisma.user.findUnique({
       where: { id: userId },
       select: { image: true },
@@ -181,6 +195,7 @@ const updateUserProfile = async (req, res) => {
 const sendFriendRequest = async (req, res) => {
   const userId = req.user;
   const { receiverId } = req.body;
+  const { timezone = "Asia/Jakarta" } = req.query;
 
   try {
     // Check if the user is already a friend
@@ -216,12 +231,15 @@ const sendFriendRequest = async (req, res) => {
     });
 
     // Send notification realtime
-    const receiverSocketId = userSocketMap.get(receiverId);
+    const receiverSocketId = await getSocketId(receiverId);
+    // const receiverSocketId = userSocketMap.get(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("friendRequest", {
         requestId: friendRequest.id,
         senderId: userId,
         username: friendRequest.sender.username,
+        date: dayjs(friendRequest.createdAt).tz(timezone).format("DD-MM-YYYY"),
+        time: dayjs(friendRequest.createdAt).tz(timezone).format("HH:mm"),
       });
     }
 
@@ -230,6 +248,8 @@ const sendFriendRequest = async (req, res) => {
       message: "Success send friend request",
       data: {
         requestId: friendRequest.id,
+        date: dayjs(friendRequest.createdAt).tz(timezone).format("DD-MM-YYYY"),
+        time: dayjs(friendRequest.createdAt).tz(timezone).format("HH:mm"),
       },
     });
   } catch (error) {
@@ -261,6 +281,9 @@ const checkFriendRequest = async (req, res) => {
             image: true,
           },
         },
+      },
+      orderBy: {
+        createdAt: "desc",
       },
     });
 
@@ -303,9 +326,20 @@ const acceptRejectFriendRequest = async (req, res) => {
     const friendRequest = await prisma.friendRequest.findUnique({
       where: { id: requestId, status: "pending" },
       include: {
+        sender: {
+          select: {
+            id: true,
+            username: true,
+            bio: true,
+            image: true,
+          },
+        },
         receiver: {
           select: {
+            id: true,
             username: true,
+            bio: true,
+            image: true,
           },
         },
       },
@@ -337,6 +371,38 @@ const acceptRejectFriendRequest = async (req, res) => {
           user2Id: friendRequest.receiverId,
         },
       });
+
+      // Send notification realtime
+      const senderId = friendRequest.sender.id;
+      const receiverId = friendRequest.receiver.id;
+
+      // Notify sender
+      const senderSocketId = await getSocketId(senderId);
+      if (senderSocketId) {
+        io.to(senderSocketId).emit("friendAccepted", {
+          userId: receiverId,
+          username: friendRequest.receiver.username,
+          bio: friendRequest.receiver.bio,
+          image: friendRequest.receiver.image,
+        });
+      }
+
+      // Notify receiver
+      const receiverSocketId = await getSocketId(receiverId);
+      if (receiverSocketId) {
+        io.to(receiverSocketId).emit("friendAccepted", {
+          userId: senderId,
+          username: friendRequest.sender.username,
+          bio: friendRequest.sender.bio,
+          image: friendRequest.sender.image,
+        });
+      }
+    }
+
+    if (status === "rejected") {
+      await prisma.friendRequest.delete({
+        where: { id: requestId },
+      });
     }
 
     return res.status(200).json({
@@ -356,6 +422,7 @@ const acceptRejectFriendRequest = async (req, res) => {
 // Get All Friend
 const getAllFriend = async (req, res) => {
   const userId = req.user;
+  const { timezone = "Asia/Jakarta" } = req.query;
 
   try {
     const friends = await prisma.friendship.findMany({
@@ -370,6 +437,7 @@ const getAllFriend = async (req, res) => {
             id: true,
             username: true,
             image: true,
+            bio: true,
           },
         },
         user2: {
@@ -377,6 +445,7 @@ const getAllFriend = async (req, res) => {
             id: true,
             username: true,
             image: true,
+            bio: true,
           },
         },
       },
@@ -388,14 +457,19 @@ const getAllFriend = async (req, res) => {
       return {
         userId: friend.id,
         username: friend.username,
+        bio: friend.bio,
         image: friend.image,
       };
     });
 
+    const sortedFriends = formattedFriends.sort((a, b) =>
+      a.username.localeCompare(b.username)
+    );
+
     return res.status(200).json({
       success: true,
       message: "Success get all friend",
-      data: formattedFriends,
+      data: sortedFriends,
     });
   } catch (error) {
     console.log(error);
@@ -407,38 +481,99 @@ const getAllFriend = async (req, res) => {
   }
 };
 
-// Search by username
-const searchByUsername = async (req, res) => {
+// Search by username or phone
+const searchByUsernameOrPhone = async (req, res) => {
   const userId = req.user;
-  const { username } = req.query;
+  const { keyword } = req.query;
+
+  if (!keyword) {
+    return res.status(400).json({
+      success: false,
+      message: "Keyword is required",
+    });
+  }
 
   try {
     const users = await prisma.user.findMany({
       where: {
-        username: {
-          contains: username,
-          mode: "insensitive",
-        },
-        NOT: {
-          id: userId,
-        },
+        AND: [
+          {
+            OR: [
+              {
+                username: {
+                  contains: keyword,
+                  mode: "insensitive",
+                },
+              },
+              {
+                phone: {
+                  contains: keyword,
+                  mode: "insensitive",
+                },
+              },
+            ],
+          },
+          {
+            id: {
+              not: userId,
+            },
+          },
+        ],
       },
       select: {
         id: true,
         username: true,
+        first_name: true,
+        last_name: true,
+        phone: true,
         image: true,
+        sentFriendRequests: {
+          where: {
+            receiverId: userId,
+          },
+          select: {
+            status: true,
+          },
+        },
+        receivedFriendRequests: {
+          where: {
+            senderId: userId,
+          },
+          select: {
+            status: true,
+          },
+        },
       },
     });
+
+    const formattedUsers = users.map((user) => {
+      const fullname = `${user.first_name} ${user.last_name}`;
+      const status =
+        user.sentFriendRequests?.length > 0
+          ? user.sentFriendRequests[0].status
+          : user.receivedFriendRequests?.length > 0
+          ? user.receivedFriendRequests[0].status
+          : "available";
+
+      return {
+        id: user.id,
+        username: user.username,
+        fullname: fullname,
+        image: user.image,
+        status: status,
+      };
+    });
+
     return res.status(200).json({
       success: true,
-      message: "Success search by username",
-      data: users,
+      message: "Success search by username or phone",
+      data: formattedUsers,
     });
   } catch (error) {
     console.log(error);
     return res.status(500).json({
       success: false,
-      message: "Error search by username",
+      message: "Error search by username or phone",
       error: error.message,
     });
   }
@@ -449,45 +584,169 @@ const recommendationFriend = async (req, res) => {
   const userId = req.user;
 
   try {
-    const mutualFriendsRecommendation = await prisma.user.findMany({
+    // 1. Ambil data user (cek apakah isi jobs atau tidak)
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        jobs: true,
+      },
+    });
+
+    // 2. Ambil semua teman user
+    const friendships = await prisma.friendship.findMany({
       where: {
-        AND: [
-          { id: { not: userId } },
-          {
-            OR: [
-              {
-                friendships1: {
-                  some: {
-                    user2: {
-                      OR: [
-                        { friendships1: { some: { user2Id: userId } } },
-                        { friendships2: { some: { user1Id: userId } } },
-                      ],
-                    },
-                  },
-                },
-              },
-            ],
-          },
+        OR: [{ user1Id: userId }, { user2Id: userId }],
+      },
+      select: {
+        user1Id: true,
+        user2Id: true,
+      },
+    });
+
+    const friendIds = friendships.map((f) =>
+      f.user1Id === userId ? f.user2Id : f.user1Id
+    );
+
+    // 3. Ambil user yang sudah kirim/terima request
+    const allFriendRequests = await prisma.friendRequest.findMany({
+      where: {
+        OR: [{ senderId: userId }, { receiverId: userId }],
+      },
+      select: {
+        senderId: true,
+        receiverId: true,
+      },
+    });
+
+    const requestedUserIds = allFriendRequests.map((r) =>
+      r.senderId === userId ? r.receiverId : r.senderId
+    );
+
+    // 4. Kumpulan ID yang harus dikecualikan dari hasil
+    const excludeIds = [userId, ...friendIds, ...requestedUserIds];
+
+    let recommendedUsers = [];
+
+    // 5. Jika user punya `jobs`, cari user lain dengan jobs yang sama
+    if (currentUser.jobs && currentUser.jobs.trim() !== "") {
+      const keyword =
+        currentUser.jobs?.split(" ").filter((k) => k.length > 2) || [];
+
+      const jobFilters = keyword.map((word) => ({
+        jobs: {
+          contains: word,
+          mode: "insensitive",
+        },
+      }));
+
+      recommendedUsers = await prisma.user.findMany({
+        where: {
+          id: { notIn: excludeIds },
+          OR: jobFilters,
+        },
+        select: {
+          id: true,
+          username: true,
+          bio: true,
+          image: true,
+          jobs: true,
+        },
+        take: 6,
+      });
+    }
+
+    // 6. Jika user tidak punya teman & jobs tidak diisi, tampilkan random 6 user
+    if (
+      (!currentUser.jobs || currentUser.jobs.trim() === "") &&
+      friendIds.length === 0
+    ) {
+      const candidates = await prisma.user.findMany({
+        where: {
+          id: { notIn: excludeIds },
+        },
+        select: {
+          id: true,
+          username: true,
+          bio: true,
+          image: true,
+          jobs: true,
+        },
+      });
+
+      recommendedUsers = candidates.sort(() => Math.random() - 0.5).slice(0, 6);
+    }
+
+    // Emit ke client jika pakai socket
+    const receiverSocketId = await getSocketId(userId);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("recommendation-friend", recommendedUsers);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Success get recommendation friend",
+      data: recommendedUsers,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: "Error get recommendation friend",
+      error: error.message,
+    });
+  }
+};
+
+// Delete Friend
+const deleteFriend = async (req, res) => {
+  const userId = req.user;
+  const { friendId } = req.params;
+
+  try {
+    const friendship = await prisma.friendship.findFirst({
+      where: {
+        OR: [
+          { user1Id: userId, user2Id: friendId },
+          { user1Id: friendId, user2Id: userId },
         ],
       },
       select: {
         id: true,
-        username: true,
-        image: true,
       },
-      take: 10,
     });
+
+    if (!friendship) {
+      return res.status(404).json({
+        success: false,
+        message: "Friendship not found",
+      });
+    }
+
+    await prisma.$transaction([
+      prisma.friendship.delete({
+        where: {
+          id: friendship.id,
+        },
+      }),
+      prisma.friendRequest.deleteMany({
+        where: {
+          OR: [
+            { senderId: userId, receiverId: friendId },
+            { senderId: friendId, receiverId: userId },
+          ],
+        },
+      }),
+    ]);
+
     return res.status(200).json({
       success: true,
-      message: "Success get recommendation friend",
-      data: mutualFriendsRecommendation,
+      message: "Friend deleted successfully",
     });
   } catch (error) {
-    console.log(error);
+    console.error(error);
     return res.status(500).json({
       success: false,
-      message: "Error get recommendation friend",
+      message: "Error deleting friend",
       error: error.message,
     });
   }
@@ -501,6 +760,7 @@ export {
   checkFriendRequest,
   acceptRejectFriendRequest,
   getAllFriend,
-  searchByUsername,
+  searchByUsernameOrPhone,
   recommendationFriend,
+  deleteFriend,
 };

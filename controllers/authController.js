@@ -20,9 +20,24 @@ const registerUser = async (req, res) => {
         .json({ success: false, message: "All fields are required!" });
     }
 
+    // Check if username already exists
+    const checkUsername = await prisma.user.findUnique({
+      where: {
+        username: username,
+      },
+    });
+
+    if (checkUsername) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Username already exists!" });
+    }
+
     // Validasi email
     if (!validator.isEmail(email)) {
-      return res.status(400).json({ success: false, message: "Invalid email!" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid email!" });
     }
 
     // Validasi password
@@ -44,6 +59,19 @@ const registerUser = async (req, res) => {
       return res
         .status(400)
         .json({ success: false, message: "Email already exists!" });
+    }
+
+    // Check if phone already exists
+    const checkPhone = await prisma.user.findUnique({
+      where: {
+        phone: phone,
+      },
+    });
+
+    if (checkPhone) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Phone number already exists!" });
     }
 
     // Hash Password

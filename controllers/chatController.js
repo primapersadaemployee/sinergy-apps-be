@@ -83,7 +83,7 @@ const getAllChatFriends = async (req, res) => {
               content: lastMessage.content,
               sender: lastMessage.sender.username,
               time: time,
-              createdAt: lastMessage.createdAt,
+              // createdAt: lastMessage.createdAt,
             }
           : null,
         // members: chat.members.map(member => ({
