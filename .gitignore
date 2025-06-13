@@ -5,4 +5,4 @@ node_modules
 /lib/generated/prisma
 
 uploads/
-# private/
+private/
