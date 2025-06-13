@@ -5,7 +5,7 @@ import userRouter from "./routes/userRoute.js";
 import chatRouter from "./routes/chatRoute.js";
 import setupSwagger from "./swagger.js";
 import { initSocket } from "./socket.js";
-import admin from "./lib/firebase.js";
+// import admin from "./lib/firebase.js";
 // import { syncUnreadCounts } from "./jobs/syncUnreadCounts.js";
 // import cron from "node-cron";
 
@@ -44,4 +44,4 @@ const server = app.listen(port, () => {
 // Initialize Socket.IO
 const io = initSocket(server);
 
-export { io, admin };
+export { io };
