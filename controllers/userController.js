@@ -6,12 +6,11 @@ import { io } from "../index.js";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc.js";
 import timezone from "dayjs/plugin/timezone.js";
-// import { userSocketMap } from "../socket.js";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-// Get User Profile
+// Cek Profil Pribadi
 const getUserProfile = async (req, res) => {
   const userId = req.user;
   try {
@@ -46,7 +45,7 @@ const getUserProfile = async (req, res) => {
   }
 };
 
-// Get user profile by id (Done)
+// Lihat Profil Teman
 const getUserProfileByUserId = async (req, res) => {
   try {
     const userId = req.params.id;
@@ -67,10 +66,24 @@ const getUserProfileByUserId = async (req, res) => {
       },
     });
 
+    const formattedUserProfile = {
+      username: userProfile.username,
+      first_name: userProfile.first_name ?? "",
+      last_name: userProfile.last_name ?? "",
+      image: userProfile.image ?? "",
+      gender: userProfile.gender ?? "",
+      marriage_status: userProfile.marriage_status ?? "",
+      phone: userProfile.phone,
+      bio: userProfile.bio ?? "",
+      desc: userProfile.desc ?? "",
+      jobs: userProfile.jobs ?? "",
+      location: userProfile.location ?? "",
+    };
+
     return res.status(200).json({
       success: true,
       message: "Success get user profile",
-      data: userProfile,
+      data: formattedUserProfile,
     });
   } catch (error) {
     console.log(error);
@@ -85,7 +98,7 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Helper function upload image to cloudinary
+// Helper function untuk upload image ke cloudinary
 const uploadToCloudinary = async (filePath) => {
   try {
     const result = await cloudinary.uploader.upload(filePath, {
@@ -105,82 +118,65 @@ const uploadToCloudinary = async (filePath) => {
   }
 };
 
-// Update User Profile (Done)
+// Update Profil User
 const updateUserProfile = async (req, res) => {
   try {
     const userId = req.user;
-    const {
-      username,
-      first_name,
-      last_name,
-      gender,
-      marriage_status,
-      phone,
-      bio,
-      desc,
-      jobs,
-      location,
-    } = req.body;
+    const data = { ...req.body }; // copy field yang dikirim user
     const image = req.file;
 
-    // Check if username already exists
-    const checkUsername = await prisma.user.findUnique({
-      where: {
-        username: username,
-      },
+    // Ambil data user sekarang
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
     });
 
-    if (checkUsername) {
+    if (!currentUser) {
       return res
-        .status(400)
-        .json({ success: false, message: "Username already exists!" });
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
-    const userImageOld = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { image: true },
-    });
+    // Validasi username jika dikirim dan diubah
+    if (data.username && data.username !== currentUser.username) {
+      const usernameExist = await prisma.user.findUnique({
+        where: { username: data.username },
+      });
 
-    let imageUrl = null;
+      if (usernameExist) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Username already exists!" });
+      }
+    }
+
+    // Handle image upload (optional)
     if (image) {
-      // Delete old image from cloudinary
-      if (userImageOld.image !== null) {
-        const publicId = userImageOld.image
+      // Delete image lama kalau ada
+      if (currentUser.image) {
+        const publicId = currentUser.image
           .split("/")
           .slice(-2)
           .join("/")
           .replace(/\.[^.]+$/, "");
-        cloudinary.uploader.destroy(publicId);
+        await cloudinary.uploader.destroy(publicId);
       }
 
-      // Upload to cloudinary
-      imageUrl = await uploadToCloudinary(image.path);
+      // Upload baru
+      const imageUrl = await uploadToCloudinary(image.path);
+      data.image = imageUrl;
 
-      // Delete file local after upload
-      fs.unlinkSync(image.path);
+      fs.unlinkSync(image.path); // Hapus file lokal
     }
 
-    // Update user profile
+    // Update hanya field yang dikirim
     await prisma.user.update({
       where: { id: userId },
-      data: {
-        username,
-        first_name,
-        last_name,
-        image: imageUrl,
-        gender,
-        marriage_status,
-        phone,
-        bio,
-        desc,
-        jobs,
-        location,
-      },
+      data,
     });
 
     return res
       .status(200)
-      .json({ success: true, message: "Success update user profile" });
+      .json({ success: true, message: "Profile updated successfully" });
   } catch (error) {
     console.error(error);
     return res.status(500).json({
@@ -191,14 +187,14 @@ const updateUserProfile = async (req, res) => {
   }
 };
 
-// Send Friend Request
+// Kirim Permintaan Pertemanan
 const sendFriendRequest = async (req, res) => {
   const userId = req.user;
   const { receiverId } = req.body;
   const { timezone = "Asia/Jakarta" } = req.query;
 
   try {
-    // Check if the user is already a friend
+    // Cek apakah sudah ada permintaan pertemanan
     const existingFriendship = await prisma.friendRequest.findFirst({
       where: {
         OR: [{ senderId: userId, receiverId }],
@@ -215,7 +211,7 @@ const sendFriendRequest = async (req, res) => {
       });
     }
 
-    // Create friend request
+    // Buat permintaan pertemanan
     const friendRequest = await prisma.friendRequest.create({
       data: {
         senderId: userId,
@@ -230,9 +226,8 @@ const sendFriendRequest = async (req, res) => {
       },
     });
 
-    // Send notification realtime
+    // Kirim notifikasi ke penerima
     const receiverSocketId = await getSocketId(receiverId);
-    // const receiverSocketId = userSocketMap.get(receiverId);
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("friendRequest", {
         requestId: friendRequest.id,
@@ -262,7 +257,7 @@ const sendFriendRequest = async (req, res) => {
   }
 };
 
-// Check friend request
+// Cek Permintaan Pertemanan
 const checkFriendRequest = async (req, res) => {
   const userId = req.user;
   const { timezone = "Asia/Jakarta" } = req.query;
@@ -316,7 +311,7 @@ const checkFriendRequest = async (req, res) => {
   }
 };
 
-// Accept or Reject Friend Request
+// Terima / Tolak Permintaan Pertemanan
 const acceptRejectFriendRequest = async (req, res) => {
   const userId = req.user;
   const { requestId } = req.params;
@@ -372,11 +367,11 @@ const acceptRejectFriendRequest = async (req, res) => {
         },
       });
 
-      // Send notification realtime
+      // Kirim Notifikasi Realtime
       const senderId = friendRequest.sender.id;
       const receiverId = friendRequest.receiver.id;
 
-      // Notify sender
+      // Notifikasi Pengirim
       const senderSocketId = await getSocketId(senderId);
       if (senderSocketId) {
         io.to(senderSocketId).emit("friendAccepted", {
@@ -387,7 +382,7 @@ const acceptRejectFriendRequest = async (req, res) => {
         });
       }
 
-      // Notify receiver
+      // Notifikasi Penerima
       const receiverSocketId = await getSocketId(receiverId);
       if (receiverSocketId) {
         io.to(receiverSocketId).emit("friendAccepted", {
@@ -419,7 +414,7 @@ const acceptRejectFriendRequest = async (req, res) => {
   }
 };
 
-// Get All Friend
+// Lihat Semua Teman
 const getAllFriend = async (req, res) => {
   const userId = req.user;
   const { timezone = "Asia/Jakarta" } = req.query;
@@ -451,16 +446,24 @@ const getAllFriend = async (req, res) => {
       },
     });
 
-    const formattedFriends = friends.map((friendship) => {
-      const friend =
-        friendship.user1Id === userId ? friendship.user2 : friendship.user1;
-      return {
-        userId: friend.id,
-        username: friend.username,
-        bio: friend.bio,
-        image: friend.image,
-      };
-    });
+    // Gunakan Set untuk melacak ID teman yang sudah diproses
+    const seenFriendIds = new Set();
+    const formattedFriends = friends
+      .map((friendship) => {
+        const friend =
+          friendship.user1Id === userId ? friendship.user2 : friendship.user1;
+        // Lewati jika ID teman sudah ada
+        if (seenFriendIds.has(friend.id)) return null;
+        seenFriendIds.add(friend.id);
+        return {
+          userId: friend.id,
+          username: friend.username,
+          bio: friend.bio,
+          image: friend.image,
+        };
+      })
+      // Filter entri null (duplikat yang dilewati)
+      .filter((friend) => friend !== null);
 
     const sortedFriends = formattedFriends.sort((a, b) =>
       a.username.localeCompare(b.username)
@@ -481,7 +484,7 @@ const getAllFriend = async (req, res) => {
   }
 };
 
-// Search by username or phone
+// Cari User dengan Username atau Nomor Telepon
 const searchByUsernameOrPhone = async (req, res) => {
   const userId = req.user;
   const { keyword } = req.query;
@@ -558,7 +561,7 @@ const searchByUsernameOrPhone = async (req, res) => {
       return {
         id: user.id,
         username: user.username,
-        fullname: fullname,
+        fullname: fullname == "null null" ? "" : fullname,
         image: user.image,
         status: status,
       };
@@ -579,12 +582,12 @@ const searchByUsernameOrPhone = async (req, res) => {
   }
 };
 
-// Recommendation Friend
+// Rekomendasi Teman
 const recommendationFriend = async (req, res) => {
   const userId = req.user;
 
   try {
-    // 1. Ambil data user (cek apakah isi jobs atau tidak)
+    // Ambil data user (cek apakah user memiliki jobs atau tidak)
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -592,7 +595,7 @@ const recommendationFriend = async (req, res) => {
       },
     });
 
-    // 2. Ambil semua teman user
+    // Ambil semua teman user
     const friendships = await prisma.friendship.findMany({
       where: {
         OR: [{ user1Id: userId }, { user2Id: userId }],
@@ -607,7 +610,7 @@ const recommendationFriend = async (req, res) => {
       f.user1Id === userId ? f.user2Id : f.user1Id
     );
 
-    // 3. Ambil user yang sudah kirim/terima request
+    // Ambil user yang sudah kirim/terima request
     const allFriendRequests = await prisma.friendRequest.findMany({
       where: {
         OR: [{ senderId: userId }, { receiverId: userId }],
@@ -622,12 +625,12 @@ const recommendationFriend = async (req, res) => {
       r.senderId === userId ? r.receiverId : r.senderId
     );
 
-    // 4. Kumpulan ID yang harus dikecualikan dari hasil
+    // Kumpulan ID yang harus dikecualikan dari hasil
     const excludeIds = [userId, ...friendIds, ...requestedUserIds];
 
     let recommendedUsers = [];
 
-    // 5. Jika user punya `jobs`, cari user lain dengan jobs yang sama
+    // Jika user punya `jobs`, cari user lain dengan jobs yang sama
     if (currentUser.jobs && currentUser.jobs.trim() !== "") {
       const keyword =
         currentUser.jobs?.split(" ").filter((k) => k.length > 2) || [];
@@ -655,7 +658,7 @@ const recommendationFriend = async (req, res) => {
       });
     }
 
-    // 6. Jika user tidak punya teman & jobs tidak diisi, tampilkan random 6 user
+    // Jika user tidak punya teman & jobs tidak diisi, tampilkan random 6 user
     if (
       (!currentUser.jobs || currentUser.jobs.trim() === "") &&
       friendIds.length === 0
@@ -697,7 +700,7 @@ const recommendationFriend = async (req, res) => {
   }
 };
 
-// Delete Friend
+// Hapus Teman
 const deleteFriend = async (req, res) => {
   const userId = req.user;
   const { friendId } = req.params;

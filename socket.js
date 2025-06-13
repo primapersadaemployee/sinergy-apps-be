@@ -1,34 +1,19 @@
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
 import { prisma } from "./lib/prisma.js";
-import { createClient } from "redis";
+import dayjs from "dayjs";
+import timezone from "dayjs/plugin/timezone.js";
+import redisClient from "./lib/redis.js";
+import {
+  startPrivateChat,
+  joinChat,
+  leaveChat,
+  sendMessage,
+} from "./controllers/chatController.js";
 
-// Initialize Redis
-const redisClient = createClient({
-  username: process.env.REDIS_USERNAME,
-  password: process.env.REDIS_PASSWORD,
-  socket: {
-    host: process.env.REDIS_HOST,
-    port: process.env.REDIS_PORT,
-  },
-});
-
-redisClient.on("error", (err) => {
-  console.error("Redis Client Error:", err.message);
-  console.error("Error details:", err);
-});
-
-redisClient.on("connect", () => {
-  console.log("Berhasil terhubung ke Redis Cloud!");
-});
-
-// Connect to Redis Cloud
-(async () => {
-  await redisClient.connect();
-})();
+dayjs.extend(timezone);
 
 let io;
-// const userSocketMap = new Map();
 
 const initSocket = (server) => {
   io = new Server(server, {
@@ -48,12 +33,8 @@ const initSocket = (server) => {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       socket.userId = decoded.id;
       const user = await prisma.user.findUnique({
-        where: {
-          id: decoded.id,
-        },
-        select: {
-          username: true,
-        },
+        where: { id: decoded.id },
+        select: { username: true },
       });
       socket.username = user.username;
       next();
@@ -63,37 +44,80 @@ const initSocket = (server) => {
   });
 
   io.on("connection", async (socket) => {
+    const userId = socket.userId;
     console.log(
-      `User connected with ID: ${socket.userId}, Username: ${socket.username}`
+      `User connected with ID: ${userId}, Username: ${socket.username}, Socket ID: ${socket.id}`
     );
-    // userSocketMap.set(socket.userId, socket.id);
 
     // Save mapping userId to socket.id in Redis
-    await redisClient.set(`user:${socket.userId}`, socket.id);
+    await redisClient.set(`user:${userId}`, socket.id);
 
     // Save online status in Redis
-    // await redisClient.set(`online:${socket.userId}`, "true");
+    await redisClient.set(`online:${userId}`, "true", { EX: 3600 });
+
+    const onlineUsers = await redisClient.keys("online:*");
+    console.log(`Online Users: ${onlineUsers.length}`);
+
+    // Handle startPrivateChat
+    socket.on("startPrivateChat", (data, callback) => {
+      startPrivateChat(socket, io, data, callback);
+    });
+
+    // Event untuk join chat room
+    socket.on("joinChat", (data) => {
+      joinChat(socket, io, data);
+    });
+
+    // Event untuk leave chat room
+    socket.on("leaveChat", (data) => {
+      leaveChat(socket, io, data);
+    });
+
+    // Handle sendMessage
+    socket.on("sendMessage", (data) => {
+      sendMessage(socket, io, data);
+    });
 
     socket.on("disconnect", async () => {
       console.log(
-        `User disconnected with ID: ${socket.userId}, Username: ${socket.username}`
+        `User disconnected with ID: ${socket.userId}, Username: ${socket.username}, Socket ID: ${socket.id}`
       );
-      // userSocketMap.delete(socket.userId);
 
-      // Delete mapping userId to socket.id in Redis
       await redisClient.del(`user:${socket.userId}`);
+      await redisClient.del(`online:${socket.userId}`);
 
-      // Delete online status in Redis
-      // await redisClient.del(`online:${socket.userId}`);
+      const onlineUsers = await redisClient.keys("online:*");
+      console.log(`Online Users: ${onlineUsers.length}`);
     });
   });
 
   return io;
 };
 
-// Get socket id by user id
 const getSocketId = async (userId) => {
   return await redisClient.get(`user:${userId}`);
 };
 
-export { initSocket, getSocketId };
+const joinChatRoom = async (userId, chatId) => {
+  const socketId = await getSocketId(userId);
+  if (socketId) {
+    const socket = io.sockets.sockets.get(socketId);
+    if (socket) {
+      socket.join(chatId);
+      console.log(`User ${userId} joined chat room: ${chatId}`);
+    }
+  }
+};
+
+const leaveChatRoom = async (userId, chatId) => {
+  const socketId = await getSocketId(userId);
+  if (socketId) {
+    const socket = io.sockets.sockets.get(socketId);
+    if (socket) {
+      socket.leave(chatId);
+      console.log(`User ${userId} left chat room: ${chatId}`);
+    }
+  }
+};
+
+export { initSocket, getSocketId, io, joinChatRoom, leaveChatRoom };

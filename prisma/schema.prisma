@@ -109,6 +109,7 @@ model ChatMember {
   joinedAt   DateTime       @default(now())
   lastReadAt DateTime?
   archivedAt DateTime?
+  deletedAt  DateTime?
 
   // Relations
   chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)

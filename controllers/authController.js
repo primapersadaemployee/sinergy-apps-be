@@ -3,12 +3,12 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import validator from "validator";
 
-// Create Token (Done)
+// Buat Token
 const createToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET);
 };
 
-// Register User (Done)
+// Register User
 const registerUser = async (req, res) => {
   try {
     const { username, email, password, phone } = req.body;
@@ -20,7 +20,7 @@ const registerUser = async (req, res) => {
         .json({ success: false, message: "All fields are required!" });
     }
 
-    // Check if username already exists
+    // Cek apakah username sudah ada
     const checkUsername = await prisma.user.findUnique({
       where: {
         username: username,
@@ -48,7 +48,7 @@ const registerUser = async (req, res) => {
       });
     }
 
-    // Check if email already exists
+    // Cek apakah email sudah ada
     const checkEmail = await prisma.user.findUnique({
       where: {
         email: email,
@@ -61,8 +61,8 @@ const registerUser = async (req, res) => {
         .json({ success: false, message: "Email already exists!" });
     }
 
-    // Check if phone already exists
-    const checkPhone = await prisma.user.findUnique({
+    // Cek apakah phone sudah ada
+    const checkPhone = await prisma.user.findFirst({
       where: {
         phone: phone,
       },
@@ -78,13 +78,14 @@ const registerUser = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Register user and create profile
+    // Register user
     await prisma.user.create({
       data: {
         username,
         email,
         password: hashedPassword,
         phone,
+        bio: "Hi there I am using Sinergy App",
       },
     });
 
@@ -97,7 +98,7 @@ const registerUser = async (req, res) => {
   }
 };
 
-// Login User (Done)
+// Login User
 const loginUser = async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -128,9 +129,12 @@ const loginUser = async (req, res) => {
 
     const token = createToken(user.id);
 
-    return res
-      .status(200)
-      .json({ success: true, message: "Login success", token });
+    return res.status(200).json({
+      success: true,
+      message: "Login success",
+      token,
+      userId: user.id,
+    });
   } catch (error) {
     console.log(error);
     return res.status(500).json({ success: false, message: "Error" });
