@@ -803,6 +803,6 @@ export {
   acceptRejectFriendRequest,
   getAllFriend,
   searchByUsernameOrPhone,
-  recommendationFriend,
+  // recommendationFriend,
   deleteFriend,
 };
