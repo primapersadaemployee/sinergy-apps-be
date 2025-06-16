@@ -86,6 +86,7 @@ const registerUser = async (req, res) => {
         password: hashedPassword,
         phone,
         bio: "Hi there I am using Sinergy App",
+        fcmTokens: [],
       },
     });
 
@@ -129,6 +130,19 @@ const loginUser = async (req, res) => {
 
     const token = createToken(user.id);
 
+    // Ambil FCM token dari header atau body (misal dikirim dari Flutter)
+    const fcmToken = req.body.fcmToken;
+    if (fcmToken) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          fcmTokens: {
+            set: [...new Set([...(user.fcmTokens || []), fcmToken])], // Hindari duplikat
+          },
+        },
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: "Login success",
@@ -141,4 +155,30 @@ const loginUser = async (req, res) => {
   }
 };
 
-export { registerUser, loginUser };
+const logoutUser = async (req, res) => {
+  const userId = req.user;
+  const { fcmToken } = req.body; // fcmToken dikirim dari Flutter
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    // Filter array untuk hapus fcmToken yang sesuai
+    const updatedTokens = user.fcmTokens.filter((t) => t !== fcmToken);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { fcmTokens: updatedTokens },
+    });
+
+    return res
+      .status(200)
+      .json({ success: true, message: "Logged out successfully" });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export { registerUser, loginUser, logoutUser };

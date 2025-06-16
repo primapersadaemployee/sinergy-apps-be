@@ -1,6 +1,7 @@
 import express from "express";
 import { registerUser, loginUser } from "../controllers/authController.js";
 import {
+  updateFcmToken,
   getUserProfile,
   updateUserProfile,
   sendFriendRequest,
@@ -12,6 +13,7 @@ import {
   searchByUsernameOrPhone,
   deleteFriend,
 } from "../controllers/userController.js";
+import { logoutUser } from "../controllers/authController.js";
 import authMiddleware from "../middleware/auth.js";
 import upload from "../config/multer.js";
 import uploadSizeImage from "../middleware/uploadSizeImage.js";
@@ -117,6 +119,8 @@ userRouter.post("/register", registerUser);
  *         description: Internal server error!
  */
 userRouter.post("/login", loginUser);
+userRouter.patch("/update-fcm-token", updateFcmToken);
+userRouter.post("/logout", authMiddleware, logoutUser);
 userRouter.get("/profile", authMiddleware, getUserProfile);
 userRouter.patch(
   "/profile",

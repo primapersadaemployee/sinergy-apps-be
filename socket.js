@@ -58,6 +58,13 @@ const initSocket = (server) => {
     const onlineUsers = await redisClient.keys("online:*");
     console.log(`Online Users: ${onlineUsers.length}`);
 
+    // Set status online user to true in socket
+    io.to(socket.id).emit("userStatusUpdate", {
+      userId: socket.userId,
+      username: socket.username,
+      isOnline: true,
+    });
+
     // Handle startPrivateChat
     socket.on("startPrivateChat", (data, callback) => {
       startPrivateChat(socket, io, data, callback);
@@ -83,8 +90,40 @@ const initSocket = (server) => {
         `User disconnected with ID: ${socket.userId}, Username: ${socket.username}, Socket ID: ${socket.id}`
       );
 
+      // Hapus mapping userId dan status online di Redis
       await redisClient.del(`user:${socket.userId}`);
       await redisClient.del(`online:${socket.userId}`);
+
+      // Kirim userStatusUpdate ke anggota chat yang relevan
+      const chats = await prisma.chat.findMany({
+        where: {
+          members: {
+            some: { userId: socket.userId, isArchived: false },
+          },
+        },
+        select: {
+          id: true,
+          members: { select: { userId: true } },
+        },
+      });
+
+      for (const chat of chats) {
+        const otherMembers = chat.members.filter(
+          (m) => m.userId !== socket.userId
+        );
+        for (const member of otherMembers) {
+          const socketId = await redisClient.get(`user:${member.userId}`);
+          if (socketId) {
+            io.to(socketId).emit("userStatusUpdate", {
+              userId: socket.userId,
+              username: socket.username,
+              isOnline: false,
+              chatId: chat.id,
+              chatType: chat.type,
+            });
+          }
+        }
+      }
 
       const onlineUsers = await redisClient.keys("online:*");
       console.log(`Online Users: ${onlineUsers.length}`);

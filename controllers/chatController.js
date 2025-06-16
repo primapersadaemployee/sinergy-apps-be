@@ -6,6 +6,7 @@ import isToday from "dayjs/plugin/isToday.js";
 import isYesterday from "dayjs/plugin/isYesterday.js";
 import { getSocketId, io } from "../socket.js";
 import redisClient from "../lib/redis.js";
+import admin from "../lib/firebase.js";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -260,7 +261,7 @@ const getAllChatGroups = async (req, res) => {
   }
 };
 
-// Semua Pesan Arsip
+// Semua Pesan Archived
 const getArchivedChats = async (req, res) => {
   const userId = req.user;
   const { timezone = "Asia/Jakarta" } = req.query;
@@ -576,12 +577,11 @@ const getChatMessages = async (req, res) => {
   const { timezone = "Asia/Jakarta" } = req.query;
 
   try {
-    // Ambil seluruh data membership
+    // Cek keanggotaan chat
     const membership = await prisma.chatMember.findFirst({
       where: { chatId, userId },
     });
 
-    // Cek keanggotaan chat
     if (!membership) {
       return res.status(403).json({
         success: false,
@@ -622,14 +622,14 @@ const getChatMessages = async (req, res) => {
       },
     });
 
-    // Ambil pesan dengan klausa 'where'
+    // Ambil semua pesan tanpa pagination
     const messages = await prisma.message.findMany({
       where: messageWhereClause,
       include: {
         sender: { select: { id: true, username: true, image: true } },
         reads: { select: { userId: true, readAt: true } },
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: "desc" }, // Pesan terbaru dulu
     });
 
     // Tandai pesan yang belum dibaca sebagai dibaca
@@ -656,32 +656,11 @@ const getChatMessages = async (req, res) => {
         })),
       });
 
-      // Update unreadCount di Redis untuk user ini
-      await redisClient.set(`unread:${userId}:${chatId}`, 0, { EX: 600 });
-
       // Emit event Socket.IO ke semua member chat
       const chatMembers = await prisma.chatMember.findMany({
         where: { chatId, NOT: { userId }, isArchived: false },
         select: { userId: true },
       });
-
-      for (const member of chatMembers) {
-        const memberUnreadCount = await prisma.message.count({
-          where: {
-            chatId,
-            NOT: {
-              reads: {
-                some: { userId: member.userId },
-              },
-            },
-          },
-        });
-        await redisClient.set(
-          `unread:${member.userId}:${chatId}`,
-          memberUnreadCount,
-          { EX: 600 }
-        );
-      }
 
       // Kirim update unreadCount ke room chat
       io.to(chatId).emit("unreadCountUpdate", {
@@ -1027,6 +1006,7 @@ const joinChat = async (socket, io, { chatId }) => {
     socket.join(chatId);
     console.log(`User ${userId} joined chat room: ${chatId}`);
 
+    // Ambil data chat untuk mendapatkan anggota lain
     const chat = await prisma.chat.findUnique({
       where: { id: chatId },
       select: {
@@ -1035,6 +1015,7 @@ const joinChat = async (socket, io, { chatId }) => {
       },
     });
 
+    // Kirim userStatusUpdate ke anggota lain di chat
     const otherMembers = chat.members.filter((m) => m.userId !== userId);
     for (const member of otherMembers) {
       const socketId = await redisClient.get(`user:${member.userId}`);
@@ -1056,33 +1037,51 @@ const joinChat = async (socket, io, { chatId }) => {
 const leaveChat = async (socket, io, { chatId }) => {
   try {
     const userId = socket.userId;
-    const username = socket.username;
     socket.leave(chatId);
     console.log(`User ${userId} left chat room: ${chatId}`);
-
-    const chat = await prisma.chat.findUnique({
-      where: { id: chatId },
-      select: {
-        type: true,
-        members: { select: { userId: true } },
-      },
-    });
-
-    const otherMembers = chat.members.filter((m) => m.userId !== userId);
-    for (const member of otherMembers) {
-      const socketId = await redisClient.get(`user:${member.userId}`);
-      if (socketId) {
-        io.to(socketId).emit("userStatusUpdate", {
-          userId,
-          username,
-          isOnline: false,
-          chatId,
-          chatType: chat.type,
-        });
-      }
-    }
   } catch (error) {
     console.error("Error leaving chat:", error);
+  }
+};
+
+const sendNotification = async (receiverId, title, body, chatId) => {
+  const receiver = await prisma.user.findUnique({
+    where: { id: receiverId },
+    select: { username: true, fcmTokens: true },
+  });
+
+  console.log(
+    "Receiver username & fcmTokens:",
+    receiver.username,
+    receiver.fcmTokens
+  );
+
+  if (receiver?.fcmTokens?.length > 0) {
+    const message = {
+      notification: {
+        title,
+        body,
+      },
+      data: {
+        chatId: chatId.toString(),
+        type: "message",
+      },
+      tokens: receiver.fcmTokens,
+    };
+
+    try {
+      const response = await admin.messaging().sendEachForMulticast(message);
+      console.log("Notification response:", response);
+      response.responses.forEach((res, index) => {
+        if (!res.success) {
+          console.error(
+            `Error sending notification to token ${receiver.fcmTokens[index]}: ${res.error}`
+          );
+        }
+      });
+    } catch (error) {
+      console.error("Error sending notification:", error);
+    }
   }
 };
 
@@ -1294,6 +1293,18 @@ const sendMessage = async (socket, io, { chatId, content }) => {
     // Kirim newMessage dan unreadUpdate ke semua anggota
     io.to(chatId).emit("newMessage", formattedMessage);
     io.to(chatId).emit("unreadCountUpdate", { chatId, userId });
+
+    // Kirim notifikasi ke anggota yang tidak bergabung di room
+    for (const member of chatMembers) {
+      if (member.userId !== userId) {
+        await sendNotification(
+          member.userId,
+          `Pesan baru dari ${username}`,
+          content,
+          chatId
+        );
+      }
+    }
   } catch (error) {
     console.error("Error sending message:", error);
   }

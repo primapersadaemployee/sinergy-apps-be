@@ -27,6 +27,7 @@ model User {
   marriage_status String?
   desc            String?
   isOnline        Boolean         @default(false)
+  fcmTokens       String[]        @default([])
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 

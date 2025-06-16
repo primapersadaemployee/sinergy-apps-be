@@ -10,6 +10,34 @@ import timezone from "dayjs/plugin/timezone.js";
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
+// Update FCM Token
+const updateFcmToken = async (req, res) => {
+  const { userId, fcmToken } = req.body;
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        fcmTokens: {
+          set: [...new Set([...(user.fcmTokens || []), fcmToken])], // Hindari duplikat
+        },
+      },
+    });
+
+    return res
+      .status(200)
+      .json({ success: true, message: "FCM token updated" });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // Cek Profil Pribadi
 const getUserProfile = async (req, res) => {
   const userId = req.user;
@@ -221,6 +249,7 @@ const sendFriendRequest = async (req, res) => {
         sender: {
           select: {
             username: true,
+            image: true,
           },
         },
       },
@@ -233,6 +262,7 @@ const sendFriendRequest = async (req, res) => {
         requestId: friendRequest.id,
         senderId: userId,
         username: friendRequest.sender.username,
+        image: friendRequest.sender.image ?? "",
         date: dayjs(friendRequest.createdAt).tz(timezone).format("DD-MM-YYYY"),
         time: dayjs(friendRequest.createdAt).tz(timezone).format("HH:mm"),
       });
@@ -756,6 +786,7 @@ const deleteFriend = async (req, res) => {
 };
 
 export {
+  updateFcmToken,
   getUserProfile,
   getUserProfileByUserId,
   updateUserProfile,
