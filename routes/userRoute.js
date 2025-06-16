@@ -119,8 +119,8 @@ userRouter.post("/register", registerUser);
  *         description: Internal server error!
  */
 userRouter.post("/login", loginUser);
-userRouter.patch("/update-fcm-token", updateFcmToken);
-userRouter.post("/logout", authMiddleware, logoutUser);
+userRouter.post("/update-fcm-token", updateFcmToken);
+userRouter.delete("/logout", authMiddleware, logoutUser);
 userRouter.get("/profile", authMiddleware, getUserProfile);
 userRouter.patch(
   "/profile",

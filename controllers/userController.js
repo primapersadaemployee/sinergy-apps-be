@@ -21,14 +21,22 @@ const updateFcmToken = async (req, res) => {
         .json({ success: false, message: "User not found" });
     }
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        fcmTokens: {
-          set: [...new Set([...(user.fcmTokens || []), fcmToken])], // Hindari duplikat
-        },
-      },
-    });
+    // Ambil token yang sudah ada, tambahkan token baru, dan hapus duplikat
+    const currentTokens = user.fcmTokens || [];
+    console.log("Current tokens:", currentTokens);
+
+    const updatedTokens = [...new Set([...currentTokens, fcmToken])];
+    console.log("Updated tokens:", updatedTokens);
+
+    if (
+      currentTokens.length !== updatedTokens.length ||
+      !currentTokens.includes(fcmToken)
+    ) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { fcmTokens: updatedTokens },
+      });
+    }
 
     return res
       .status(200)

@@ -157,7 +157,7 @@ const loginUser = async (req, res) => {
 
 const logoutUser = async (req, res) => {
   const userId = req.user;
-  const { fcmToken } = req.body; // fcmToken dikirim dari Flutter
+  const { fcmToken } = req.body;
   try {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
