@@ -8,7 +8,7 @@ import {
   checkFriendRequest,
   acceptRejectFriendRequest,
   getAllFriend,
-  // recommendationFriend,
+  recommendationFriend,
   getUserProfileByUserId,
   searchByUsernameOrPhone,
   deleteFriend,
@@ -138,7 +138,7 @@ userRouter.patch(
 );
 userRouter.get("/friends", authMiddleware, getAllFriend);
 userRouter.get("/friends/search", authMiddleware, searchByUsernameOrPhone);
-// userRouter.get("/friends/recommendation", authMiddleware, recommendationFriend);
+userRouter.get("/friends/recommendation", authMiddleware, recommendationFriend);
 userRouter.delete("/friend/:friendId", authMiddleware, deleteFriend);
 userRouter.get("/:id", authMiddleware, getUserProfileByUserId);
 

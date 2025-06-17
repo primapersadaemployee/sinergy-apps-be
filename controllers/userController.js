@@ -12,7 +12,14 @@ dayjs.extend(timezone);
 
 // Update FCM Token
 const updateFcmToken = async (req, res) => {
-  const { userId, fcmToken } = req.body;
+  const { userId, fcmToken, oldToken } = req.body;
+
+  if (!userId || !fcmToken) {
+    return res
+      .status(400)
+      .json({ success: false, message: "userId and fcmToken are required" });
+  }
+
   try {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
@@ -23,24 +30,36 @@ const updateFcmToken = async (req, res) => {
 
     // Ambil token yang sudah ada, tambahkan token baru, dan hapus duplikat
     const currentTokens = user.fcmTokens || [];
-    console.log("Current tokens:", currentTokens);
+    // console.log("Current tokens:", currentTokens);
+    let updatedTokens;
 
-    const updatedTokens = [...new Set([...currentTokens, fcmToken])];
-    console.log("Updated tokens:", updatedTokens);
+    if (oldToken) {
+      console.log(
+        `Refreshing token for user ${userId}: replacing ${oldToken} with ${fcmToken}`
+      );
 
-    if (
-      currentTokens.length !== updatedTokens.length ||
-      !currentTokens.includes(fcmToken)
-    ) {
-      await prisma.user.update({
-        where: { id: userId },
-        data: { fcmTokens: updatedTokens },
-      });
+      updatedTokens = currentTokens.map((token) =>
+        token === oldToken ? fcmToken : token
+      );
+
+      if (!updatedTokens.includes(fcmToken)) {
+        updatedTokens.push(fcmToken);
+      }
+    } else {
+      console.log(`Adding new token for user ${userId}: ${fcmToken}`);
+      updatedTokens = [...currentTokens, fcmToken];
     }
+
+    const finalTokens = [...new Set(updatedTokens)];
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { fcmTokens: finalTokens },
+    });
 
     return res
       .status(200)
-      .json({ success: true, message: "FCM token updated" });
+      .json({ success: true, message: "FCM token processed successfully" });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -230,6 +249,8 @@ const sendFriendRequest = async (req, res) => {
   const { timezone = "Asia/Jakarta" } = req.query;
 
   try {
+    console.log("Receiver ID:", receiverId);
+    console.log("User ID:", userId);
     // Cek apakah sudah ada permintaan pertemanan
     const existingFriendship = await prisma.friendRequest.findFirst({
       where: {
@@ -312,6 +333,7 @@ const checkFriendRequest = async (req, res) => {
             id: true,
             username: true,
             image: true,
+            bio: true,
           },
         },
       },
@@ -329,6 +351,7 @@ const checkFriendRequest = async (req, res) => {
         userId: request.sender.id,
         username: request.sender.username,
         image: request.sender.image,
+        bio: request.sender.bio,
         date: date,
         time: time,
       };
@@ -621,122 +644,122 @@ const searchByUsernameOrPhone = async (req, res) => {
 };
 
 // Rekomendasi Teman
-// const recommendationFriend = async (req, res) => {
-//   const userId = req.user;
+const recommendationFriend = async (req, res) => {
+  const userId = req.user;
 
-//   try {
-//     // Ambil data user (cek apakah user memiliki jobs atau tidak)
-//     const currentUser = await prisma.user.findUnique({
-//       where: { id: userId },
-//       select: {
-//         jobs: true,
-//       },
-//     });
+  try {
+    // Ambil data user (cek apakah user memiliki jobs atau tidak)
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        jobs: true,
+      },
+    });
 
-//     // Ambil semua teman user
-//     const friendships = await prisma.friendship.findMany({
-//       where: {
-//         OR: [{ user1Id: userId }, { user2Id: userId }],
-//       },
-//       select: {
-//         user1Id: true,
-//         user2Id: true,
-//       },
-//     });
+    // Ambil semua teman user
+    const friendships = await prisma.friendship.findMany({
+      where: {
+        OR: [{ user1Id: userId }, { user2Id: userId }],
+      },
+      select: {
+        user1Id: true,
+        user2Id: true,
+      },
+    });
 
-//     const friendIds = friendships.map((f) =>
-//       f.user1Id === userId ? f.user2Id : f.user1Id
-//     );
+    const friendIds = friendships.map((f) =>
+      f.user1Id === userId ? f.user2Id : f.user1Id
+    );
 
-//     // Ambil user yang sudah kirim/terima request
-//     const allFriendRequests = await prisma.friendRequest.findMany({
-//       where: {
-//         OR: [{ senderId: userId }, { receiverId: userId }],
-//       },
-//       select: {
-//         senderId: true,
-//         receiverId: true,
-//       },
-//     });
+    // Ambil user yang sudah kirim/terima request
+    const allFriendRequests = await prisma.friendRequest.findMany({
+      where: {
+        OR: [{ senderId: userId }, { receiverId: userId }],
+      },
+      select: {
+        senderId: true,
+        receiverId: true,
+      },
+    });
 
-//     const requestedUserIds = allFriendRequests.map((r) =>
-//       r.senderId === userId ? r.receiverId : r.senderId
-//     );
+    const requestedUserIds = allFriendRequests.map((r) =>
+      r.senderId === userId ? r.receiverId : r.senderId
+    );
 
-//     // Kumpulan ID yang harus dikecualikan dari hasil
-//     const excludeIds = [userId, ...friendIds, ...requestedUserIds];
+    // Kumpulan ID yang harus dikecualikan dari hasil
+    const excludeIds = [userId, ...friendIds, ...requestedUserIds];
 
-//     let recommendedUsers = [];
+    let recommendedUsers = [];
 
-//     // Jika user punya `jobs`, cari user lain dengan jobs yang sama
-//     if (currentUser.jobs && currentUser.jobs.trim() !== "") {
-//       const keyword =
-//         currentUser.jobs?.split(" ").filter((k) => k.length > 2) || [];
+    // Jika user punya `jobs`, cari user lain dengan jobs yang sama
+    if (currentUser.jobs && currentUser.jobs.trim() !== "") {
+      const keyword =
+        currentUser.jobs?.split(" ").filter((k) => k.length > 2) || [];
 
-//       const jobFilters = keyword.map((word) => ({
-//         jobs: {
-//           contains: word,
-//           mode: "insensitive",
-//         },
-//       }));
+      const jobFilters = keyword.map((word) => ({
+        jobs: {
+          contains: word,
+          mode: "insensitive",
+        },
+      }));
 
-//       recommendedUsers = await prisma.user.findMany({
-//         where: {
-//           id: { notIn: excludeIds },
-//           OR: jobFilters,
-//         },
-//         select: {
-//           id: true,
-//           username: true,
-//           bio: true,
-//           image: true,
-//           jobs: true,
-//         },
-//         take: 6,
-//       });
-//     }
+      recommendedUsers = await prisma.user.findMany({
+        where: {
+          id: { notIn: excludeIds },
+          OR: jobFilters,
+        },
+        select: {
+          id: true,
+          username: true,
+          bio: true,
+          image: true,
+          jobs: true,
+        },
+        take: 6,
+      });
+    }
 
-//     // Jika user tidak punya teman & jobs tidak diisi, tampilkan random 6 user
-//     if (
-//       (!currentUser.jobs || currentUser.jobs.trim() === "") &&
-//       friendIds.length === 0
-//     ) {
-//       const candidates = await prisma.user.findMany({
-//         where: {
-//           id: { notIn: excludeIds },
-//         },
-//         select: {
-//           id: true,
-//           username: true,
-//           bio: true,
-//           image: true,
-//           jobs: true,
-//         },
-//       });
+    // Jika user tidak punya teman & jobs tidak diisi, tampilkan random 6 user
+    if (
+      (!currentUser.jobs || currentUser.jobs.trim() === "") &&
+      friendIds.length === 0
+    ) {
+      const candidates = await prisma.user.findMany({
+        where: {
+          id: { notIn: excludeIds },
+        },
+        select: {
+          id: true,
+          username: true,
+          bio: true,
+          image: true,
+          jobs: true,
+        },
+      });
 
-//       recommendedUsers = candidates.sort(() => Math.random() - 0.5).slice(0, 6);
-//     }
+      recommendedUsers = candidates.sort(() => Math.random() - 0.5).slice(0, 6);
+    }
 
-//     // Emit ke client jika pakai socket
-//     const receiverSocketId = await getSocketId(userId);
-//     if (receiverSocketId) {
-//       io.to(receiverSocketId).emit("recommendation-friend", recommendedUsers);
-//     }
+    // Emit ke client jika pakai socket
+    const receiverSocketId = await getSocketId(userId);
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("recommendation-friend", recommendedUsers);
+    }
 
-//     return res.status(200).json({
-//       success: true,
-//       message: "Success get recommendation friend",
-//       data: recommendedUsers,
-//     });
-//   } catch (error) {
-//     console.error(error);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Error get recommendation friend",
-//       error: error.message,
-//     });
-//   }
-// };
+    return res.status(200).json({
+      success: true,
+      message: "Success get recommendation friend",
+      data: recommendedUsers,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: "Error get recommendation friend",
+      error: error.message,
+    });
+  }
+};
 
 // Hapus Teman
 const deleteFriend = async (req, res) => {
@@ -803,6 +826,6 @@ export {
   acceptRejectFriendRequest,
   getAllFriend,
   searchByUsernameOrPhone,
-  // recommendationFriend,
+  recommendationFriend,
   deleteFriend,
 };

@@ -53,7 +53,7 @@ const initSocket = (server) => {
     await redisClient.set(`user:${userId}`, socket.id);
 
     // Save online status in Redis
-    await redisClient.set(`online:${userId}`, "true", { EX: 3600 });
+    await redisClient.set(`online:${userId}`, "true", { EX: 600 });
 
     const onlineUsers = await redisClient.keys("online:*");
     console.log(`Online Users: ${onlineUsers.length}`);
@@ -89,6 +89,9 @@ const initSocket = (server) => {
       console.log(
         `User disconnected with ID: ${socket.userId}, Username: ${socket.username}, Socket ID: ${socket.id}`
       );
+
+      // Cleanup existing listeners
+      socket.removeAllListeners();
 
       // Hapus mapping userId dan status online di Redis
       await redisClient.del(`user:${socket.userId}`);

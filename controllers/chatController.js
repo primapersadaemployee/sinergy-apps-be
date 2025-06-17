@@ -7,6 +7,7 @@ import isYesterday from "dayjs/plugin/isYesterday.js";
 import { getSocketId, io } from "../socket.js";
 import redisClient from "../lib/redis.js";
 import admin from "../lib/firebase.js";
+import { v2 as cloudinary } from "cloudinary";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -102,7 +103,7 @@ const getAllChatFriends = async (req, res) => {
             unreadCount = 0;
             try {
               await redisClient.set(`unread:${userId}:${chat.id}`, 0, {
-                EX: 600, // Expire dalam 10 menit
+                EX: 3600, // Expire dalam 1 jam
               });
             } catch (error) {
               console.log(`Redis set error:`, error.message);
@@ -123,7 +124,7 @@ const getAllChatFriends = async (req, res) => {
                 `unread:${userId}:${chat.id}`,
                 unreadCount,
                 {
-                  EX: 600, // Expire dalam 10 menit
+                  EX: 3600, // Expire dalam 1 jam
                 }
               );
             } catch (error) {
@@ -629,7 +630,7 @@ const getChatMessages = async (req, res) => {
         sender: { select: { id: true, username: true, image: true } },
         reads: { select: { userId: true, readAt: true } },
       },
-      orderBy: { createdAt: "desc" }, // Pesan terbaru dulu
+      orderBy: { createdAt: "asc" },
     });
 
     // Tandai pesan yang belum dibaca sebagai dibaca
@@ -1044,6 +1045,33 @@ const leaveChat = async (socket, io, { chatId }) => {
   }
 };
 
+// Cloudinary config
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// Helper function untuk upload image ke cloudinary
+const uploadToCloudinary = async (filePath) => {
+  try {
+    const result = await cloudinary.uploader.upload(filePath, {
+      folder: "chatting-apps",
+      use_filename: true,
+      transformation: [
+        { width: 500, height: 500, crop: "limit" },
+        { quality: "auto" },
+        { fetch_format: "auto" },
+      ],
+    });
+
+    return result.secure_url;
+  } catch (error) {
+    console.error("Cloudinary Upload Error:", error);
+    throw new Error("Image upload failed");
+  }
+};
+
 const sendNotification = async (receiverId, title, body, chatId) => {
   const receiver = await prisma.user.findUnique({
     where: { id: receiverId },
@@ -1085,10 +1113,13 @@ const sendNotification = async (receiverId, title, body, chatId) => {
   }
 };
 
-const sendMessage = async (socket, io, { chatId, content }) => {
+const sendMessage = async (
+  socket,
+  io,
+  { chatId, content, messageType = "text" }
+) => {
   const userId = socket.userId;
   const username = socket.username;
-  const messageType = "text";
   const timezone = "Asia/Jakarta";
 
   try {
@@ -1118,7 +1149,7 @@ const sendMessage = async (socket, io, { chatId, content }) => {
     });
 
     // Set unreadCount pengirim ke 0
-    await redisClient.set(`unread:${userId}:${chatId}`, 0, { EX: 600 });
+    await redisClient.set(`unread:${userId}:${chatId}`, 0, { EX: 3600 });
 
     // Update waktu chat
     await prisma.chat.update({
@@ -1198,7 +1229,7 @@ const sendMessage = async (socket, io, { chatId, content }) => {
         readByUsers.push(member.userId);
         // Set unreadCount ke 0 untuk users yang tergabung dalam room
         await redisClient.set(`unread:${member.userId}:${chatId}`, 0, {
-          EX: 600,
+          EX: 3600,
         });
       }
     }
@@ -1238,7 +1269,7 @@ const sendMessage = async (socket, io, { chatId, content }) => {
         await redisClient.set(
           `unread:${member.userId}:${chatId}`,
           unreadCount,
-          { EX: 600 }
+          { EX: 3600 }
         );
       } else {
         unreadCount = parseInt(unreadCount);
@@ -1248,7 +1279,7 @@ const sendMessage = async (socket, io, { chatId, content }) => {
           await redisClient.set(
             `unread:${member.userId}:${chatId}`,
             unreadCount,
-            { EX: 600 }
+            { EX: 3600 }
           );
         }
       }
@@ -1294,7 +1325,7 @@ const sendMessage = async (socket, io, { chatId, content }) => {
     io.to(chatId).emit("newMessage", formattedMessage);
     io.to(chatId).emit("unreadCountUpdate", { chatId, userId });
 
-    // Kirim notifikasi ke anggota yang tidak bergabung di room
+    // Kirim notifikasi ke anggota selain pengirim
     for (const member of chatMembers) {
       if (member.userId !== userId) {
         await sendNotification(
