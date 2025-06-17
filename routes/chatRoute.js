@@ -9,8 +9,10 @@ import {
   getAllChatGroups,
   getListGroupChat,
   clearMyChatHistory,
+  uploadChatImage,
 } from "../controllers/chatController.js";
 import authMiddleware from "../middleware/auth.js";
+import upload from "../config/multer.js";
 
 const chatRouter = express.Router();
 
@@ -22,9 +24,6 @@ chatRouter.get("/", getAllChatFriends);
 chatRouter.get("/groups", getAllChatGroups);
 chatRouter.get("/archived", getArchivedChats);
 
-// Private chat routes
-// chatRouter.post("/private", startPrivateChat);
-
 // Group chat routes
 chatRouter.post("/group", createGroupChat);
 chatRouter.post("/group/:chatId/members", addGroupMembers);
@@ -32,7 +31,12 @@ chatRouter.get("/group/:groupId", getListGroupChat);
 
 // Message routes
 chatRouter.get("/:chatId/messages", getChatMessages);
-// chatRouter.post("/:chatId/messages", sendMessage);
+chatRouter.post(
+  "/image",
+  authMiddleware,
+  upload.single("image"),
+  uploadChatImage
+);
 chatRouter.post("/:chatId/clear-my-history", clearMyChatHistory);
 
 // Archive routes
