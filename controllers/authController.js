@@ -87,6 +87,7 @@ const registerUser = async (req, res) => {
         phone,
         bio: "Hi there I am using Sinergy App",
         fcmTokens: [],
+        locations: null,
       },
     });
 

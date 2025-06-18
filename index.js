@@ -7,8 +7,8 @@ import setupSwagger from "./swagger.js";
 import { initSocket } from "./socket.js";
 import admin from "./lib/firebase.js";
 import rateLimit from "express-rate-limit";
-import { syncUnreadCounts } from "./jobs/syncUnreadCounts.js";
-import cron from "node-cron";
+// import { syncUnreadCounts } from "./jobs/syncUnreadCounts.js";
+// import cron from "node-cron";
 
 // Initialize Express
 const app = express();
@@ -33,10 +33,10 @@ const apiLimiter = rateLimit({
 app.use("/api/", apiLimiter);
 
 // Cron Job Every 15 minutes
-cron.schedule("*/15 * * * *", () => {
-  console.log("Running syncUnreadCounts job....");
-  syncUnreadCounts();
-});
+// cron.schedule("*/15 * * * *", () => {
+//   console.log("Running syncUnreadCounts job....");
+//   syncUnreadCounts();
+// });
 
 // Routes
 app.use("/api/user", userRouter);
@@ -44,7 +44,7 @@ app.use("/api/chat", chatRouter);
 setupSwagger(app);
 
 app.get("/", (req, res) => {
-  res.send("API Working!");
+  res.send("Sinergy Apps BE");
 });
 
 // Start the server

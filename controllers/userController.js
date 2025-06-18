@@ -6,6 +6,7 @@ import { io } from "../index.js";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc.js";
 import timezone from "dayjs/plugin/timezone.js";
+import { ObjectId } from "mongodb";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -816,6 +817,142 @@ const deleteFriend = async (req, res) => {
   }
 };
 
+// Update Lokasi User
+const updateLocation = async (req, res) => {
+  const userId = req.user;
+  const { latitude, longitude } = req.body;
+
+  try {
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        locations: {
+          type: "Point",
+          coordinates: [longitude, latitude],
+        },
+        locationsUpdatedAt: new Date(),
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Location updated successfully",
+    });
+  } catch (error) {
+    console.error("Error in updateLocation:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error updating location",
+      error: error.message,
+    });
+  }
+};
+
+// Cari Orang Terdekat
+const getPeopleNearby = async (req, res) => {
+  const userId = req.user; // Pastikan ini adalah string ID pengguna
+  const { radius = 5000, gender } = req.query; // Radius dalam meter, default 5km
+
+  try {
+    // Validasi userId dan konversi ke ObjectId di awal
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user ID",
+      });
+    }
+    const currentObjectId = new ObjectId(userId); // Konversi ke ObjectId di sini
+
+    // Ambil lokasi user saat ini
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { locations: true, username: true },
+    });
+
+    if (!currentUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (!currentUser.locations) {
+      return res.status(400).json({
+        success: false,
+        message: "User locations not set",
+      });
+    }
+
+    // Query MongoDB native untuk geospatial
+    const usersRawResult = await prisma.$runCommandRaw({
+      aggregate: "users",
+      pipeline: [
+        {
+          $geoNear: {
+            near: currentUser.locations,
+            distanceField: "distance", // Jarak dalam meter
+            maxDistance: parseInt(radius),
+            spherical: true,
+          },
+        },
+        {
+          $match: {
+            _id: { $ne: currentObjectId }, // Ini tetap cara yang benar untuk memfilter ObjectId di MongoDB
+          },
+        },
+        {
+          $project: {
+            _id: 1, // Akan mengembalikan { $oid: 'stringID' }
+            username: 1,
+            bio: 1,
+            gender: 1,
+            image: 1,
+            distance: 1,
+          },
+        },
+        {
+          $sort: { distance: 1 }, // Urutkan dari yang terdekat
+        },
+      ],
+      cursor: {},
+    });
+
+    const nearbyUsers = usersRawResult.cursor.firstBatch.map((user) => {
+      const userIdString = user._id ? user._id["$oid"] : null;
+      const mappedUser = {
+        id: userIdString, // Kini seharusnya menjadi string ID yang benar
+        username: user.username,
+        bio: user.bio ?? null,
+        gender: user.gender ?? null,
+        image: user.image ?? null,
+        distance: (user.distance / 1000).toFixed(2), // Konversi ke km
+      };
+      return mappedUser;
+    });
+
+    const finalFilteredUsers = nearbyUsers.filter(
+      (user) => user.id !== userId // userId dari req.user yang string
+    );
+
+    if (gender) {
+      finalFilteredUsers.filter((user) => user.gender === gender);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Successfully retrieved nearby users",
+      data: finalFilteredUsers,
+    });
+  } catch (error) {
+    console.error("Error in getPeopleNearby:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error retrieving nearby users",
+      error: error.message,
+    });
+  }
+};
+
 export {
   updateFcmToken,
   getUserProfile,
@@ -828,4 +965,6 @@ export {
   searchByUsernameOrPhone,
   recommendationFriend,
   deleteFriend,
+  updateLocation,
+  getPeopleNearby,
 };

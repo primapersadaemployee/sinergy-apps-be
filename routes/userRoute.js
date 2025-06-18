@@ -12,6 +12,8 @@ import {
   getUserProfileByUserId,
   searchByUsernameOrPhone,
   deleteFriend,
+  updateLocation,
+  getPeopleNearby,
 } from "../controllers/userController.js";
 import { logoutUser } from "../controllers/authController.js";
 import authMiddleware from "../middleware/auth.js";
@@ -129,6 +131,8 @@ userRouter.patch(
   uploadSizeImage,
   updateUserProfile
 );
+userRouter.patch("/update-location", authMiddleware, updateLocation);
+userRouter.get("/people-nearby", authMiddleware, getPeopleNearby);
 userRouter.post("/friend/request", authMiddleware, sendFriendRequest);
 userRouter.get("/friend/requests", authMiddleware, checkFriendRequest);
 userRouter.patch(

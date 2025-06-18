@@ -4,5 +4,5 @@ node_modules
 
 /lib/generated/prisma
 
-uploads/
+# uploads/
 private/

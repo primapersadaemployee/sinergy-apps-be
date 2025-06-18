@@ -12,24 +12,26 @@ datasource db {
 
 // User model - untuk menyimpan data user
 model User {
-  id              String          @id @default(auto()) @map("_id") @db.ObjectId
-  username        String          @unique
-  email           String          @unique
-  password        String
-  first_name      String?
-  last_name       String?
-  image           String?
-  bio             String?
-  gender          String?
-  location        String?
-  phone           String?
-  jobs            String?
-  marriage_status String?
-  desc            String?
-  isOnline        Boolean         @default(false)
-  fcmTokens       String[]        @default([])
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  id                 String          @id @default(auto()) @map("_id") @db.ObjectId
+  username           String          @unique
+  email              String          @unique
+  password           String
+  first_name         String?
+  last_name          String?
+  image              String?
+  bio                String?
+  gender             String?
+  location           String?
+  locations          Json?
+  locationsUpdatedAt DateTime?
+  phone              String?
+  jobs               String?
+  marriage_status    String?
+  desc               String?
+  isOnline           Boolean         @default(false)
+  fcmTokens          String[]        @default([])
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 
   // Relations
   sentFriendRequests     FriendRequest[] @relation("SentRequests")
@@ -102,15 +104,16 @@ model Chat {
 
 // Chat Member model - untuk anggota dalam chat
 model ChatMember {
-  id         String         @id @default(auto()) @map("_id") @db.ObjectId
-  chatId     String         @db.ObjectId
-  userId     String         @db.ObjectId
-  role       ChatMemberRole @default(member)
-  isArchived Boolean        @default(false)
-  joinedAt   DateTime       @default(now())
-  lastReadAt DateTime?
-  archivedAt DateTime?
-  deletedAt  DateTime?
+  id          String         @id @default(auto()) @map("_id") @db.ObjectId
+  chatId      String         @db.ObjectId
+  userId      String         @db.ObjectId
+  role        ChatMemberRole @default(member)
+  isArchived  Boolean        @default(false)
+  unreadCount Int            @default(0)
+  joinedAt    DateTime       @default(now())
+  lastReadAt  DateTime?
+  archivedAt  DateTime?
+  deletedAt   DateTime?
 
   // Relations
   chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
