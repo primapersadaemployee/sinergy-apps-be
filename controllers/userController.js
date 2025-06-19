@@ -250,8 +250,6 @@ const sendFriendRequest = async (req, res) => {
   const { timezone = "Asia/Jakarta" } = req.query;
 
   try {
-    console.log("Receiver ID:", receiverId);
-    console.log("User ID:", userId);
     // Cek apakah sudah ada permintaan pertemanan
     const existingFriendship = await prisma.friendRequest.findFirst({
       where: {
@@ -292,7 +290,7 @@ const sendFriendRequest = async (req, res) => {
         requestId: friendRequest.id,
         senderId: userId,
         username: friendRequest.sender.username,
-        image: friendRequest.sender.image ?? "",
+        image: friendRequest.sender.image ?? null,
         date: dayjs(friendRequest.createdAt).tz(timezone).format("DD-MM-YYYY"),
         time: dayjs(friendRequest.createdAt).tz(timezone).format("HH:mm"),
       });
@@ -351,7 +349,7 @@ const checkFriendRequest = async (req, res) => {
         id: request.id,
         userId: request.sender.id,
         username: request.sender.username,
-        image: request.sender.image,
+        image: request.sender.image ?? null,
         bio: request.sender.bio,
         date: date,
         time: time,
@@ -850,98 +848,129 @@ const updateLocation = async (req, res) => {
 
 // Cari Orang Terdekat
 const getPeopleNearby = async (req, res) => {
-  const userId = req.user; // Pastikan ini adalah string ID pengguna
-  const { radius = 5000, gender } = req.query; // Radius dalam meter, default 5km
+  const userId = req.user;
+  const { radius = 5000, gender } = req.query;
 
   try {
-    // Validasi userId dan konversi ke ObjectId di awal
     if (!ObjectId.isValid(userId)) {
       return res.status(400).json({
         success: false,
         message: "Invalid user ID",
       });
     }
-    const currentObjectId = new ObjectId(userId); // Konversi ke ObjectId di sini
 
-    // Ambil lokasi user saat ini
+    const currentObjectId = new ObjectId(userId);
+
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
       select: { locations: true, username: true },
     });
 
-    if (!currentUser) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    if (!currentUser.locations) {
+    if (!currentUser || !currentUser.locations) {
       return res.status(400).json({
         success: false,
-        message: "User locations not set",
+        message: "User not found or location not set",
       });
     }
 
-    // Query MongoDB native untuk geospatial
+    const friendships = await prisma.friendship.findMany({
+      where: {
+        OR: [{ user1Id: userId }, { user2Id: userId }],
+      },
+      select: { user1Id: true, user2Id: true },
+    });
+
+    const friendIdsSet = new Set();
+    for (const f of friendships) {
+      const friendId = String(f.user1Id === userId ? f.user2Id : f.user1Id);
+      friendIdsSet.add(friendId);
+    }
+
+    const friendRequests = await prisma.friendRequest.findMany({
+      where: {
+        OR: [{ senderId: userId }, { receiverId: userId }],
+      },
+      select: {
+        senderId: true,
+        receiverId: true,
+        status: true,
+      },
+    });
+
+    // Build aggregation pipeline
+    const pipeline = [
+      {
+        $geoNear: {
+          near: currentUser.locations, // GeoJSON { type: 'Point', coordinates: [lng, lat] }
+          distanceField: "distance",
+          maxDistance: parseInt(radius),
+          spherical: true,
+        },
+      },
+      {
+        $match: {
+          _id: { $ne: currentObjectId },
+          ...(gender ? { gender } : {}),
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          username: 1,
+          bio: 1,
+          gender: 1,
+          image: 1,
+          distance: 1,
+        },
+      },
+      {
+        $sort: { distance: 1 },
+      },
+    ];
+
     const usersRawResult = await prisma.$runCommandRaw({
       aggregate: "users",
-      pipeline: [
-        {
-          $geoNear: {
-            near: currentUser.locations,
-            distanceField: "distance", // Jarak dalam meter
-            maxDistance: parseInt(radius),
-            spherical: true,
-          },
-        },
-        {
-          $match: {
-            _id: { $ne: currentObjectId }, // Ini tetap cara yang benar untuk memfilter ObjectId di MongoDB
-          },
-        },
-        {
-          $project: {
-            _id: 1, // Akan mengembalikan { $oid: 'stringID' }
-            username: 1,
-            bio: 1,
-            gender: 1,
-            image: 1,
-            distance: 1,
-          },
-        },
-        {
-          $sort: { distance: 1 }, // Urutkan dari yang terdekat
-        },
-      ],
+      pipeline,
       cursor: {},
     });
 
-    const nearbyUsers = usersRawResult.cursor.firstBatch.map((user) => {
-      const userIdString = user._id ? user._id["$oid"] : null;
-      const mappedUser = {
-        id: userIdString, // Kini seharusnya menjadi string ID yang benar
-        username: user.username,
-        bio: user.bio ?? null,
-        gender: user.gender ?? null,
-        image: user.image ?? null,
-        distance: (user.distance / 1000).toFixed(2), // Konversi ke km
-      };
-      return mappedUser;
-    });
+    const rawUsers = usersRawResult?.cursor?.firstBatch ?? [];
 
-    const finalFilteredUsers = nearbyUsers.filter(
-      (user) => user.id !== userId // userId dari req.user yang string
+    // Tambahan filter manual agar user sendiri tidak terbawa
+    const filteredRawUsers = rawUsers.filter(
+      (user) => user._id?.["$oid"] !== userId
     );
 
-    if (gender) {
-      finalFilteredUsers.filter((user) => user.gender === gender);
-    }
+    const nearbyUsers = await Promise.all(
+      filteredRawUsers.map(async (user) => {
+        const userIdString = user._id?.["$oid"];
+        const isFriend = friendIdsSet.has(userIdString);
+
+        const request = friendRequests.find(
+          (r) =>
+            (r.senderId === userId && r.receiverId === userIdString) ||
+            (r.receiverId === userId && r.senderId === userIdString)
+        );
+
+        const status = request?.status ?? "available";
+
+        return {
+          id: userIdString,
+          username: user.username,
+          bio: user.bio ?? null,
+          gender: user.gender ?? null,
+          image: user.image ?? null,
+          distance: user.distance.toFixed(0),
+          isFriend,
+          status,
+        };
+      })
+    );
 
     return res.status(200).json({
       success: true,
       message: "Successfully retrieved nearby users",
-      data: finalFilteredUsers,
+      data: nearbyUsers,
     });
   } catch (error) {
     console.error("Error in getPeopleNearby:", error);

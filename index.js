@@ -3,7 +3,6 @@ import cors from "cors";
 import "dotenv/config";
 import userRouter from "./routes/userRoute.js";
 import chatRouter from "./routes/chatRoute.js";
-import setupSwagger from "./swagger.js";
 import { initSocket } from "./socket.js";
 import admin from "./lib/firebase.js";
 import rateLimit from "express-rate-limit";
@@ -20,8 +19,8 @@ app.use(cors());
 
 // Rate Limiter
 const apiLimiter = rateLimit({
-  windowMs: 1000, // 15 menit
-  max: 50, // Batasi setiap IP hingga 100 request per 'windowMs'
+  windowMs: 15 * 60 * 1000, // 15 menit
+  max: 100, // Batasi setiap IP hingga 100 request per 'windowMs'
   standardHeaders: true, // Kirim header 'RateLimit-*'
   legacyHeaders: false, // Nonaktifkan header 'X-RateLimit-*'
   message: {
@@ -41,7 +40,6 @@ app.use("/api/", apiLimiter);
 // Routes
 app.use("/api/user", userRouter);
 app.use("/api/chat", chatRouter);
-setupSwagger(app);
 
 app.get("/", (req, res) => {
   res.send("Sinergy Apps BE");
@@ -54,5 +52,14 @@ const server = app.listen(port, () => {
 
 // Initialize Socket.IO
 const io = initSocket(server);
+
+process.on("SIGTERM", async () => {
+  await prisma.$disconnect();
+  await redisClient.quit();
+  server.close(() => {
+    console.log("Server shut down gracefully");
+    process.exit(0);
+  });
+});
 
 export { io, admin };

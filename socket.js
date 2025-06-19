@@ -9,6 +9,8 @@ import {
   joinChat,
   leaveChat,
   sendMessage,
+  startNearbyChat,
+  sendMessageNearby,
 } from "./controllers/chatController.js";
 
 dayjs.extend(timezone);
@@ -21,6 +23,8 @@ const initSocket = (server) => {
       origin: "*",
       methods: ["GET", "POST"],
     },
+    maxHttpBufferSize: 1e6,
+    perMessageDeflate: false,
   });
 
   io.use(async (socket, next) => {
@@ -32,11 +36,22 @@ const initSocket = (server) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       socket.userId = decoded.id;
-      const user = await prisma.user.findUnique({
-        where: { id: decoded.id },
-        select: { username: true },
-      });
-      socket.username = user.username;
+      const cachedUsername = await redisClient.get(`username:${socket.userId}`);
+      if (cachedUsername) {
+        socket.username = cachedUsername;
+      } else {
+        const user = await prisma.user.findUnique({
+          where: { id: decoded.id },
+          select: { username: true },
+        });
+        socket.username = user.username;
+        await redisClient.set(
+          `username:${socket.userId}`,
+          user.username,
+          "EX",
+          3600
+        );
+      }
       next();
     } catch (error) {
       next(new Error("Authentication error: Invalid token"));
@@ -53,7 +68,7 @@ const initSocket = (server) => {
     await redisClient.set(`user:${userId}`, socket.id);
 
     // Save online status in Redis
-    await redisClient.set(`online:${userId}`, "true", { EX: 600 });
+    await redisClient.set(`online:${userId}`, "true", "EX", 3600);
 
     const onlineUsers = await redisClient.keys("online:*");
     console.log(`Online Users: ${onlineUsers.length}`);
@@ -70,6 +85,11 @@ const initSocket = (server) => {
       startPrivateChat(socket, io, data, callback);
     });
 
+    // Handle startNearbyChat
+    socket.on("startNearbyChat", (data, callback) => {
+      startNearbyChat(socket, io, data, callback);
+    });
+
     // Event untuk join chat room
     socket.on("joinChat", (data) => {
       joinChat(socket, io, data);
@@ -83,6 +103,11 @@ const initSocket = (server) => {
     // Handle sendMessage
     socket.on("sendMessage", (data) => {
       sendMessage(socket, io, data);
+    });
+
+    // Handle sendMessageNearby
+    socket.on("sendMessageNearby", (data) => {
+      sendMessageNearby(socket, io, data);
     });
 
     socket.on("disconnect", async () => {
