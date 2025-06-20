@@ -11,6 +11,7 @@ datasource db {
 }
 
 // User model - untuk menyimpan data user
+// db.users.createIndex({ locations: "2dsphere" });
 model User {
   id                 String          @id @default(auto()) @map("_id") @db.ObjectId
   username           String          @unique
@@ -22,7 +23,7 @@ model User {
   bio                String?
   gender             String?
   location           String?
-  locations          Json?
+  locations          Json?           
   locationsUpdatedAt DateTime?
   phone              String?
   jobs               String?
@@ -93,6 +94,7 @@ model Chat {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  expiresAt   DateTime?
 
   // Relations
   members  ChatMember[]
@@ -206,6 +208,7 @@ enum FriendRequestStatus {
 enum ChatType {
   private
   group
+  nearby
 }
 
 enum ChatMemberRole {

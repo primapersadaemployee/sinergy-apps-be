@@ -6,8 +6,10 @@ import chatRouter from "./routes/chatRoute.js";
 import { initSocket } from "./socket.js";
 import admin from "./lib/firebase.js";
 import rateLimit from "express-rate-limit";
+import inboxRouter from "./routes/inboxRoute.js";
 // import { syncUnreadCounts } from "./jobs/syncUnreadCounts.js";
-// import cron from "node-cron";
+import { cleanupNearbyChats } from "./jobs/cleanupNearbyChats.js";
+import cron from "node-cron";
 
 // Initialize Express
 const app = express();
@@ -31,15 +33,16 @@ const apiLimiter = rateLimit({
 });
 app.use("/api/", apiLimiter);
 
-// Cron Job Every 15 minutes
-// cron.schedule("*/15 * * * *", () => {
-//   console.log("Running syncUnreadCounts job....");
-//   syncUnreadCounts();
-// });
+// Cron Job Every Days at 2 AM
+cron.schedule("0 2 * * *", () => {
+  console.log("Running cleanupNearbyChats job...");
+  cleanupNearbyChats();
+});
 
 // Routes
 app.use("/api/user", userRouter);
 app.use("/api/chat", chatRouter);
+app.use("/api/inbox", inboxRouter);
 
 app.get("/", (req, res) => {
   res.send("Sinergy Apps BE");

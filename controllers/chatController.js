@@ -643,64 +643,16 @@ const getChatMessages = async (req, res) => {
         where: { chatId_userId: { chatId, userId } },
         data: { unreadCount: 0 },
       });
-      // await redisClient.set(`unread:${userId}:${chatId}`, 0, { EX: 3600 });
       await redisClient.set(`unread:${userId}:${chatId}`, 0, "EX", 3600);
 
       // Emit event Socket.IO ke semua member chat
-      // const chatMembers = await prisma.chatMember.findMany({
-      //   where: { chatId, NOT: { userId }, isArchived: false },
-      //   select: { userId: true },
-      // });
-
       io.to(chatId).emit("unreadCountUpdate", {
         chatId,
         userId,
       });
     }
 
-    // Data status online
-    // let onlineStatus = {};
-    // if (chat.type === "private") {
-    //   const otherMember = chat.members.find((m) => m.userId !== userId);
-    //   if (otherMember) {
-    //     const isOnline =
-    //       (await redisClient.get(`online:${otherMember.userId}`)) === "true";
-    //     onlineStatus = {
-    //       type: "private",
-    //       friend: {
-    //         userId: otherMember.userId,
-    //         username: otherMember.user.username,
-    //         image: otherMember.user.image,
-    //         isOnline,
-    //       },
-    //     };
-    //   }
-    // } else {
-    //   const onlineMembers = await Promise.all(
-    //     chat.members
-    //       .filter((m) => m.userId !== userId)
-    //       .map(async (m) => {
-    //         try {
-    //           const isOnline =
-    //             (await redisClient.get(`online:${m.userId}`)) === "true";
-    //           return isOnline;
-    //         } catch (error) {
-    //           console.log(
-    //             `Redis error checking online status for user ${m.userId}:`,
-    //             error.message
-    //           );
-    //           return false;
-    //         }
-    //       })
-    //   );
-
-    //   const onlineCount = onlineMembers.filter(Boolean).length;
-    //   onlineStatus = {
-    //     type: "group",
-    //     onlineCount,
-    //   };
-    // }
-
+    // Data Online Status
     let onlineStatus = {};
     if (chat.type === "private") {
       const otherMember = chat.members.find((m) => m.userId !== userId);
@@ -777,6 +729,16 @@ const getChatMessages = async (req, res) => {
       where: { chatId_userId: { chatId, userId } },
       data: { lastReadAt: new Date() },
     });
+
+    if (chat.type === "nearby") {
+      return res.status(200).json({
+        success: true,
+        message: "Successfully retrieved chat messages",
+        data: {
+          messages: groupedArray,
+        },
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -1422,6 +1384,7 @@ const startNearbyChat = async (socket, io, { userId, peopleId }, callback) => {
     const newChat = await prisma.chat.create({
       data: {
         type: "nearby",
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 Hari
         members: {
           create: [
             { userId: userId, role: "member", isArchived: false },
@@ -1468,7 +1431,7 @@ const startNearbyChat = async (socket, io, { userId, peopleId }, callback) => {
 };
 
 // Helper function untuk mengirim pesan people nearby
-const sendMessageNearby = async (
+const sendNearbyMessage = async (
   socket,
   io,
   { chatId, content, messageType = "text" }
@@ -1539,7 +1502,7 @@ const sendMessageNearby = async (
       },
     });
 
-    // Format pesan untuk event newMessageNearby
+    // Format pesan untuk event newNearbyMessage
     const formattedMessage = {
       chatId,
       type: chat.type,
@@ -1656,19 +1619,19 @@ const sendMessageNearby = async (
       };
     }
 
-    // Kirim newLastMessageNearby ke semua anggota chat
+    // Kirim newNearbyLastMessage", ke semua anggota chat
     for (const member of chatMembers) {
       const socketId = await redisClient.get(`user:${member.userId}`);
       if (socketId) {
         io.to(socketId).emit(
-          "newLastMessageNearby",
+          "newNearbyLastMessage",
           formattedLastMessages[member.userId]
         );
       }
     }
 
-    // Kirim newMessageNearby dan unreadUpdate ke semua anggota chat
-    io.to(chatId).emit("newMessageNearby", formattedMessage);
+    // Kirim newNearbyMessage dan unreadUpdate ke semua anggota chat
+    io.to(chatId).emit("newNearbyMessage", formattedMessage);
     io.to(chatId).emit("unreadCountUpdate", { chatId, userId });
 
     // Kirim notifikasi ke user selain pengirim
@@ -1676,7 +1639,7 @@ const sendMessageNearby = async (
       if (member.userId !== userId) {
         await sendNotification(
           member.userId,
-          `Pesan baru dari orang sekitar ${username}`,
+          `Pesan dari orang sekitar ${username}`,
           message.content,
           chatId
         );
@@ -1684,6 +1647,162 @@ const sendMessageNearby = async (
     }
   } catch (error) {
     console.error("Error sending message nearby:", error);
+  }
+};
+
+// Semua Pesan Private
+const getAllChatNearby = async (req, res) => {
+  const userId = req.user;
+  const { timezone = "Asia/Jakarta" } = req.query;
+
+  try {
+    const chats = await prisma.chat.findMany({
+      where: {
+        type: "nearby",
+        members: {
+          some: {
+            userId: userId,
+            isArchived: false,
+          },
+        },
+      },
+      include: {
+        members: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                image: true,
+              },
+            },
+          },
+        },
+        messages: {
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 1,
+          include: {
+            sender: {
+              select: {
+                id: true,
+                username: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+    });
+
+    const friendRequests = await prisma.friendRequest.findMany({
+      where: {
+        OR: [{ senderId: userId }, { receiverId: userId }],
+      },
+      select: {
+        senderId: true,
+        receiverId: true,
+        status: true,
+      },
+    });
+
+    // Ambil otherMemberIds dan cek kalau ada
+    const otherMemberIds = chats
+      .map((chat) => chat.members.find((m) => m.userId !== userId)?.user.id)
+      .filter(Boolean);
+    let unreadCounts;
+
+    if (otherMemberIds.length === 0) {
+      // Kalau gak ada member lain, set status online manual dan ambil unreadCount
+      // onlineStatuses = chats.map(() => false);
+      unreadCounts = await Promise.all(
+        chats.map((chat) =>
+          redisClient
+            .get(`unread:${userId}:${chat.id}`)
+            .then((count) => (count !== null ? parseInt(count) : 0))
+        )
+      );
+    } else {
+      // Pake mget kalau ada member lain
+      // onlineStatuses = await redisClient.mget(
+      //   otherMemberIds.map((id) => `online:${id}`)
+      // );
+      const unreadCountKeys = chats.map(
+        (chat) => `unread:${userId}:${chat.id}`
+      );
+      unreadCounts = await redisClient.mget(unreadCountKeys);
+    }
+
+    // Format data
+    const formattedChats = chats.map((chat, index) => {
+      const otherMembers = chat.members.filter((m) => m.userId !== userId);
+      const lastMessage = chat.messages[0];
+      let content = lastMessage?.content;
+      const messageType = lastMessage?.messageType;
+
+      if (messageType === "image") content = "📷 Foto";
+
+      const created = lastMessage
+        ? dayjs(lastMessage.createdAt).tz(timezone)
+        : null;
+      let time = "";
+      if (created) {
+        if (created.isToday()) time = created.format("HH:mm");
+        else if (created.isYesterday()) time = "Kemarin";
+        else time = created.format("DD-MM-YYYY");
+      }
+
+      // const isOnline =
+      //   otherMemberIds.length > 0 ? onlineStatuses[index] === "true" : false;
+      let unreadCount =
+        otherMemberIds.length > 0
+          ? parseInt(unreadCounts[index] || "0")
+          : unreadCounts[index] !== null
+          ? unreadCounts[index]
+          : 0;
+      if (unreadCount === 0 && lastMessage?.senderId === userId) {
+        unreadCount = 0;
+      }
+
+      const request = friendRequests.find(
+        (r) =>
+          (r.senderId === userId &&
+            r.receiverId === otherMembers[0]?.user.id) ||
+          (r.receiverId === userId && r.senderId === otherMembers[0]?.user.id)
+      );
+
+      const status = request?.status ?? "available";
+
+      return {
+        id: chat.id,
+        userId: otherMembers[0]?.user.id,
+        type: chat.type,
+        name: otherMembers[0]?.user.username || "Unknown User",
+        image: otherMembers[0]?.user.image || null,
+        lastMessage: lastMessage
+          ? { content, sender: lastMessage.sender.username, time }
+          : null,
+        unreadCount: unreadCount || 0,
+        status,
+        // isOnline,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Successfully retrieved all chats from people nearby",
+      data: formattedChats,
+    });
+  } catch (error) {
+    console.error("Error in getAllChatNearby:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error retrieving chats",
+      error: error.message,
+    });
   }
 };
 
@@ -1703,5 +1822,6 @@ export {
   sendMessage,
   uploadChatImage,
   startNearbyChat,
-  sendMessageNearby,
+  sendNearbyMessage,
+  getAllChatNearby,
 };

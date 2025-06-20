@@ -452,6 +452,30 @@ const acceptRejectFriendRequest = async (req, res) => {
           image: friendRequest.sender.image,
         });
       }
+
+      // Cek apakah sebelumnya sudah chat di nearby
+      const existingChat = await prisma.chat.findFirst({
+        where: {
+          type: "nearby",
+          AND: [
+            { members: { some: { userId: senderId, isArchived: false } } },
+            { members: { some: { userId: receiverId, isArchived: false } } },
+          ],
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (existingChat) {
+        await prisma.chat.delete({
+          where: { id: existingChat.id },
+        });
+
+        io.to(senderSocketId).emit("deleteNearbyChat", {
+          chatId: existingChat.id,
+        });
+      }
     }
 
     if (status === "rejected") {
@@ -849,7 +873,7 @@ const updateLocation = async (req, res) => {
 // Cari Orang Terdekat
 const getPeopleNearby = async (req, res) => {
   const userId = req.user;
-  const { radius = 5000, gender } = req.query;
+  const { radius = 10000, gender } = req.query;
 
   try {
     if (!ObjectId.isValid(userId)) {

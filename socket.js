@@ -10,7 +10,7 @@ import {
   leaveChat,
   sendMessage,
   startNearbyChat,
-  sendMessageNearby,
+  sendNearbyMessage,
 } from "./controllers/chatController.js";
 
 dayjs.extend(timezone);
@@ -105,9 +105,9 @@ const initSocket = (server) => {
       sendMessage(socket, io, data);
     });
 
-    // Handle sendMessageNearby
-    socket.on("sendMessageNearby", (data) => {
-      sendMessageNearby(socket, io, data);
+    // Handle sendNearbyMessage
+    socket.on("sendNearbyMessage", (data) => {
+      sendNearbyMessage(socket, io, data);
     });
 
     socket.on("disconnect", async () => {
