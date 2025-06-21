@@ -10,6 +10,12 @@ import inboxRouter from "./routes/inboxRoute.js";
 // import { syncUnreadCounts } from "./jobs/syncUnreadCounts.js";
 import { cleanupNearbyChats } from "./jobs/cleanupNearbyChats.js";
 import cron from "node-cron";
+import path from "path";
+import { fileURLToPath } from "url";
+import fs from "fs";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Initialize Express
 const app = express();
@@ -43,6 +49,20 @@ cron.schedule("0 2 * * *", () => {
 app.use("/api/user", userRouter);
 app.use("/api/chat", chatRouter);
 app.use("/api/inbox", inboxRouter);
+
+// Handle Update APK
+app.get("/updates", (req, res) => {
+  const filePath = path.join(__dirname, "apk", "app-release.apk");
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({
+      success: false,
+      message: "File APK tidak ditemukan",
+    });
+  }
+
+  res.download(filePath, "Sinergy-Apps.apk");
+});
 
 app.get("/", (req, res) => {
   res.send("Sinergy Apps BE");

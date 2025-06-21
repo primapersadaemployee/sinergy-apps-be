@@ -671,11 +671,11 @@ const recommendationFriend = async (req, res) => {
   const userId = req.user;
 
   try {
-    // Ambil data user (cek apakah user memiliki jobs atau tidak)
+    // Ambil data user (cek apakah user memiliki lokasi atau tidak)
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
       select: {
-        jobs: true,
+        locations: true,
       },
     });
 
@@ -711,42 +711,62 @@ const recommendationFriend = async (req, res) => {
 
     // Kumpulan ID yang harus dikecualikan dari hasil
     const excludeIds = [userId, ...friendIds, ...requestedUserIds];
+    const excludeObjectIds = excludeIds.map((id) => new ObjectId(id));
 
     let recommendedUsers = [];
 
-    // Jika user punya `jobs`, cari user lain dengan jobs yang sama
-    if (currentUser.jobs && currentUser.jobs.trim() !== "") {
-      const keyword =
-        currentUser.jobs?.split(" ").filter((k) => k.length > 2) || [];
+    // Jika user punya lokasi, cari user lain dengan lokasi terdekat
+    if (currentUser.locations !== null) {
+      const pipeline = [
+        {
+          $geoNear: {
+            near: currentUser.locations, // GeoJSON
+            distanceField: "distance",
+            maxDistance: 10000, // 10km
+            spherical: true,
+          },
+        },
+        {
+          $match: {
+            _id: { $nin: excludeObjectIds },
+          },
+        },
+        {
+          $project: {
+            _id: 1,
+            username: 1,
+            bio: 1,
+            image: 1,
+            jobs: 1,
+            distance: 1,
+          },
+        },
+        { $sort: { distance: 1 } },
+        { $limit: 6 },
+      ];
 
-      const jobFilters = keyword.map((word) => ({
-        jobs: {
-          contains: word,
-          mode: "insensitive",
-        },
-      }));
-
-      recommendedUsers = await prisma.user.findMany({
-        where: {
-          id: { notIn: excludeIds },
-          OR: jobFilters,
-        },
-        select: {
-          id: true,
-          username: true,
-          bio: true,
-          image: true,
-          jobs: true,
-        },
-        take: 6,
+      const result = await prisma.$runCommandRaw({
+        aggregate: "users",
+        pipeline,
+        cursor: {},
       });
+
+      const excludeIdStrs = excludeIds.map(String); // Semua jadi string
+
+      recommendedUsers =
+        result?.cursor?.firstBatch
+          ?.filter((user) => !excludeIdStrs.includes(user._id["$oid"])) // Filter semua
+          ?.map((user) => ({
+            id: user._id["$oid"],
+            username: user.username,
+            bio: user.bio ?? null,
+            image: user.image ?? null,
+            jobs: user.jobs ?? null,
+          })) ?? [];
     }
 
-    // Jika user tidak punya teman & jobs tidak diisi, tampilkan random 6 user
-    if (
-      (!currentUser.jobs || currentUser.jobs.trim() === "") &&
-      friendIds.length === 0
-    ) {
+    // Jika user tidak punya teman & lokasi tidak diisi, tampilkan random 6 user
+    if (currentUser.locations === null && friendIds.length === 0) {
       const candidates = await prisma.user.findMany({
         where: {
           id: { notIn: excludeIds },
@@ -761,12 +781,6 @@ const recommendationFriend = async (req, res) => {
       });
 
       recommendedUsers = candidates.sort(() => Math.random() - 0.5).slice(0, 6);
-    }
-
-    // Emit ke client jika pakai socket
-    const receiverSocketId = await getSocketId(userId);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("recommendation-friend", recommendedUsers);
     }
 
     return res.status(200).json({
