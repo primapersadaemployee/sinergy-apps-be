@@ -198,8 +198,36 @@ const getAllChatGroups = async (req, res) => {
       },
     });
 
-    const formattedChats = chats.map((chat) => {
+    // Ambil otherMemberIds dan cek kalau ada
+    const otherMemberIds = chats
+      .map((chat) => chat.members.find((m) => m.userId !== userId)?.user.id)
+      .filter(Boolean);
+    let unreadCounts;
+
+    if (otherMemberIds.length === 0) {
+      unreadCounts = await Promise.all(
+        chats.map((chat) =>
+          redisClient
+            .get(`unread:${userId}:${chat.id}`)
+            .then((count) => (count !== null ? parseInt(count) : 0))
+        )
+      );
+    } else {
+      const unreadCountKeys = chats.map(
+        (chat) => `unread:${userId}:${chat.id}`
+      );
+      unreadCounts = await redisClient.mget(unreadCountKeys);
+    }
+
+    // Format data
+    const formattedChats = chats.map((chat, index) => {
+      const otherMembers = chat.members.filter((m) => m.userId !== userId);
       const lastMessage = chat.messages[0];
+      let content = lastMessage?.content;
+      const messageType = lastMessage?.messageType;
+
+      if (messageType === "image") content = "📷 Foto";
+
       const created = lastMessage
         ? dayjs(lastMessage.createdAt).tz(timezone)
         : null;
@@ -214,19 +242,29 @@ const getAllChatGroups = async (req, res) => {
         }
       }
 
+      let unreadCount =
+        otherMemberIds.length > 0
+          ? parseInt(unreadCounts[index] || "0")
+          : unreadCounts[index] !== null
+          ? unreadCounts[index]
+          : 0;
+      if (unreadCount === 0 && lastMessage?.senderId === userId) {
+        unreadCount = 0;
+      }
+
       return {
         id: chat.id,
         type: chat.type,
-        groupName: chat.name,
+        name: chat.name,
         image: chat.icon,
         lastMessage: lastMessage
           ? {
               content: lastMessage.content,
               sender: lastMessage.sender.username,
               time: time,
-              createdAt: lastMessage.createdAt,
             }
           : null,
+        unreadCount: unreadCount || 0,
       };
     });
 
@@ -349,18 +387,39 @@ const getArchivedChats = async (req, res) => {
 // Buat Grup Chat
 const createGroupChat = async (req, res) => {
   const userId = req.user;
-  const { name, description, memberIds } = req.body;
+  const { name, memberIds } = req.body;
+  const image = req.file;
+
+  // console.log(memberIds);
+
+  // Parse memberIds dari string JSON ke array
+  let parsedMemberIds = [];
+  parsedMemberIds = JSON.parse(memberIds); // Ubah string "[...]" menjadi array
+  if (!Array.isArray(parsedMemberIds)) {
+    throw new Error("memberIds must be an array");
+  }
+
+  // console.log(parsedMemberIds);
 
   try {
     // Termasuk user sendiri
-    const uniqueMemberIds = [...new Set([userId, ...memberIds])];
+    const uniqueMemberIds = [...new Set([userId, ...parsedMemberIds])];
+    // console.log(uniqueMemberIds);
+
+    // Upload image ke cloudinary
+    let icon = null;
+    if (image) {
+      const imageUrl = await uploadToCloudinary(image.path);
+      icon = imageUrl;
+      fs.unlinkSync(image.path);
+    }
 
     // Buat grup chat
     const newGroupChat = await prisma.chat.create({
       data: {
         type: "group",
         name,
-        description,
+        icon,
         members: {
           create: uniqueMemberIds.map((memberId) => ({
             userId: memberId,
@@ -390,6 +449,7 @@ const createGroupChat = async (req, res) => {
         io.to(socketId).emit("newGroupChat", {
           id: newGroupChat.id,
           name: newGroupChat.name,
+          icon: newGroupChat.icon,
           description: newGroupChat.description,
           members: newGroupChat.members.map((m) => ({
             userId: m.user.id,
@@ -407,6 +467,7 @@ const createGroupChat = async (req, res) => {
       data: {
         id: newGroupChat.id,
         name: newGroupChat.name,
+        icon: newGroupChat.icon,
         description: newGroupChat.description,
         members: newGroupChat.members.map((member) => ({
           userId: member.user.id,
@@ -429,12 +490,12 @@ const createGroupChat = async (req, res) => {
 // Lihat Detail Grup Chat
 const getListGroupChat = async (req, res) => {
   const userId = req.user;
-  const { groupId } = req.params;
+  const { chatId } = req.params;
 
   try {
     const groupChat = await prisma.chat.findUnique({
       where: {
-        id: groupId,
+        id: chatId,
         type: "group",
         members: {
           some: {
@@ -488,6 +549,107 @@ const getListGroupChat = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Error getting list group chat",
+      error: error.message,
+    });
+  }
+};
+
+// Update Grup Chat
+const updateGroupChat = async (req, res) => {
+  const userId = req.user;
+  const { chatId } = req.params;
+  const data = { ...req.body };
+  const image = req.file;
+
+  try {
+    // Cek apakah user adalah admin
+    const userMembership = await prisma.chatMember.findFirst({
+      where: {
+        chatId,
+        userId,
+        role: "admin",
+      },
+    });
+
+    if (!userMembership) {
+      return res.status(403).json({
+        success: false,
+        message: "Only admin can update group chat",
+      });
+    }
+
+    // Cek icon grup
+    const latestGroup = await prisma.chat.findUnique({
+      where: {
+        id: chatId,
+      },
+      select: {
+        icon: true,
+      },
+    });
+
+    // Upload image ke cloudinary
+    if (image) {
+      if (latestGroup.icon !== null) {
+        const publicId = latestGroup.icon
+          .split("/")
+          .slice(-2)
+          .join("/")
+          .replace(/\.[^.]+$/, "");
+        await cloudinary.uploader.destroy(publicId);
+      }
+
+      // Upload icon baru
+      const imageUrl = await uploadToCloudinary(image.path);
+      data.icon = imageUrl;
+      fs.unlinkSync(image.path);
+    }
+
+    // Update grup chat
+    const updatedGroupChat = await prisma.chat.update({
+      where: {
+        id: chatId,
+      },
+      data,
+    });
+
+    // Semua member masuk room
+    const members = await prisma.chatMember.findMany({
+      where: {
+        chatId,
+      },
+      select: {
+        userId: true,
+      },
+    });
+
+    for (const member of members) {
+      const socketId = await getSocketId(member.userId);
+      if (socketId) {
+        io.to(socketId).emit("updatedGroupChat", {
+          id: updatedGroupChat.id,
+          name: updatedGroupChat.name,
+          icon: updatedGroupChat.icon,
+          description: updatedGroupChat.description,
+        });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Group chat updated successfully",
+      data: {
+        id: updatedGroupChat.id,
+        name: updatedGroupChat.name,
+        icon: updatedGroupChat.icon,
+        description: updatedGroupChat.description,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      success: false,
+      message: "Error updating group chat",
       error: error.message,
     });
   }
@@ -677,7 +839,7 @@ const getChatMessages = async (req, res) => {
       );
       onlineStatus = {
         type: "group",
-        onlineCount: onlineMembers.filter(Boolean).length,
+        // onlineCount: onlineMembers.filter(Boolean).length,
       };
     }
 
@@ -962,12 +1124,17 @@ const startPrivateChat = async (socket, io, { userId, friendId }, callback) => {
       isOnline: friend.isOnline ?? false,
     };
 
-    const socketId = await redisClient.get(`user:${userId}`);
-    if (socketId) {
-      io.to(socketId).emit("newPrivateChat", formattedNewPrivateChat);
+    try {
+      const socketId = await redisClient.get(`user:${userId}`);
+      if (socketId) {
+        io.to(socketId).emit("newPrivateChat", formattedNewPrivateChat);
+      }
+    } catch (error) {
+      console.error("Error sending newPrivateChat event:", error);
     }
   } catch (error) {
     console.error("Error starting private chat:", error);
+
     callback({ success: false, message: "Error creating private chat" });
   }
 };
@@ -1315,15 +1482,26 @@ const sendMessage = async (
     for (const member of chatMembers) {
       const socketId = await redisClient.get(`user:${member.userId}`);
       if (socketId) {
-        io.to(socketId).emit(
-          "newLastMessage",
-          formattedLastMessages[member.userId]
-        );
+        if (chat.type === "private") {
+          io.to(socketId).emit(
+            "newLastMessage",
+            formattedLastMessages[member.userId]
+          );
+        } else {
+          io.to(socketId).emit(
+            "newGroupLastMessage",
+            formattedLastMessages[member.userId]
+          );
+        }
       }
     }
 
     // Kirim newMessage dan unreadUpdate ke semua anggota
-    io.to(chatId).emit("newMessage", formattedMessage);
+    if (chat.type === "private") {
+      io.to(chatId).emit("newMessage", formattedMessage);
+    } else {
+      io.to(chatId).emit("newGroupMessage", formattedMessage);
+    }
     io.to(chatId).emit("unreadCountUpdate", { chatId, userId });
 
     // Format notification content
@@ -1335,12 +1513,21 @@ const sendMessage = async (
     // Kirim notifikasi ke anggota selain pengirim
     for (const member of chatMembers) {
       if (member.userId !== userId) {
-        await sendNotification(
-          member.userId,
-          `Pesan baru dari ${username}`,
-          notificationContent,
-          chatId
-        );
+        if (chat.type === "private") {
+          await sendNotification(
+            member.userId,
+            `Pesan baru dari ${username}`,
+            notificationContent,
+            chatId
+          );
+        } else {
+          await sendNotification(
+            member.userId,
+            chat.name,
+            message.sender.username + ": " + notificationContent,
+            chatId
+          );
+        }
       }
     }
   } catch (error) {
@@ -1812,6 +1999,7 @@ export {
   getArchivedChats,
   createGroupChat,
   getListGroupChat,
+  updateGroupChat,
   addGroupMembers,
   getChatMessages,
   toggleArchiveChat,

@@ -7,7 +7,6 @@ import { initSocket } from "./socket.js";
 import admin from "./lib/firebase.js";
 import rateLimit from "express-rate-limit";
 import inboxRouter from "./routes/inboxRoute.js";
-// import { syncUnreadCounts } from "./jobs/syncUnreadCounts.js";
 import { cleanupNearbyChats } from "./jobs/cleanupNearbyChats.js";
 import cron from "node-cron";
 import path from "path";
@@ -23,7 +22,12 @@ const port = process.env.PORT;
 
 // Middleware
 app.use(express.json());
-app.use(cors());
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+  })
+);
 
 // Rate Limiter
 const apiLimiter = rateLimit({

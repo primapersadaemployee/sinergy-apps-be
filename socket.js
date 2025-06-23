@@ -59,6 +59,11 @@ const initSocket = (server) => {
   });
 
   io.on("connection", async (socket) => {
+    if (!socket.userId || !socket.username) {
+      socket.disconnect(true);
+      return;
+    }
+
     const userId = socket.userId;
     console.log(
       `User connected with ID: ${userId}, Username: ${socket.username}, Socket ID: ${socket.id}`
@@ -82,31 +87,49 @@ const initSocket = (server) => {
 
     // Handle startPrivateChat
     socket.on("startPrivateChat", (data, callback) => {
+      if (!socket.userId) {
+        return callback({ error: "Unauthorized" });
+      }
       startPrivateChat(socket, io, data, callback);
     });
 
     // Handle startNearbyChat
     socket.on("startNearbyChat", (data, callback) => {
+      if (!socket.userId) {
+        return callback({ error: "Unauthorized" });
+      }
       startNearbyChat(socket, io, data, callback);
     });
 
     // Event untuk join chat room
     socket.on("joinChat", (data) => {
+      if (!socket.userId) {
+        return;
+      }
       joinChat(socket, io, data);
     });
 
     // Event untuk leave chat room
     socket.on("leaveChat", (data) => {
+      if (!socket.userId) {
+        return;
+      }
       leaveChat(socket, io, data);
     });
 
     // Handle sendMessage
     socket.on("sendMessage", (data) => {
+      if (!socket.userId) {
+        return;
+      }
       sendMessage(socket, io, data);
     });
 
     // Handle sendNearbyMessage
     socket.on("sendNearbyMessage", (data) => {
+      if (!socket.userId) {
+        return;
+      }
       sendNearbyMessage(socket, io, data);
     });
 

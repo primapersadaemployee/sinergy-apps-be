@@ -3,6 +3,7 @@ import {
   getAllChatFriends,
   getArchivedChats,
   createGroupChat,
+  updateGroupChat,
   addGroupMembers,
   getChatMessages,
   toggleArchiveChat,
@@ -25,18 +26,14 @@ chatRouter.get("/groups", getAllChatGroups);
 chatRouter.get("/archived", getArchivedChats);
 
 // Group chat routes
-chatRouter.post("/group", createGroupChat);
+chatRouter.post("/group", upload.single("image"), createGroupChat);
+chatRouter.get("/group/:chatId", getListGroupChat);
+chatRouter.patch("/group/:chatId", upload.single("image"), updateGroupChat);
 chatRouter.post("/group/:chatId/members", addGroupMembers);
-chatRouter.get("/group/:groupId", getListGroupChat);
 
 // Message routes
 chatRouter.get("/:chatId/messages", getChatMessages);
-chatRouter.post(
-  "/image",
-  authMiddleware,
-  upload.single("image"),
-  uploadChatImage
-);
+chatRouter.post("/image", upload.single("image"), uploadChatImage);
 chatRouter.post("/:chatId/clear-my-history", clearMyChatHistory);
 
 // Archive routes
