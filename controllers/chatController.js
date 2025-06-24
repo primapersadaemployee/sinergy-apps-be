@@ -21,12 +21,13 @@ const getAllChatFriends = async (req, res) => {
   const { timezone = "Asia/Jakarta" } = req.query;
 
   try {
+    // Ambil chat privat yang belum di arsipkan
     const chats = await prisma.chat.findMany({
       where: {
         type: "private",
         members: {
           some: {
-            userId: userId,
+            userId,
             isArchived: false,
           },
         },
@@ -44,16 +45,11 @@ const getAllChatFriends = async (req, res) => {
           },
         },
         messages: {
-          orderBy: {
-            createdAt: "desc",
-          },
+          orderBy: { createdAt: "desc" },
           take: 1,
           include: {
             sender: {
-              select: {
-                id: true,
-                username: true,
-              },
+              select: { id: true, username: true },
             },
           },
         },
@@ -63,34 +59,34 @@ const getAllChatFriends = async (req, res) => {
       },
     });
 
-    // Ambil otherMemberIds dan cek kalau ada
+    // Cari userId teman dalam tiap chat
     const otherMemberIds = chats
       .map((chat) => chat.members.find((m) => m.userId !== userId)?.user.id)
       .filter(Boolean);
-    let onlineStatuses, unreadCounts;
 
-    if (otherMemberIds.length === 0) {
-      // Kalau gak ada member lain, set status online manual dan ambil unreadCount
-      onlineStatuses = chats.map(() => false);
-      unreadCounts = await Promise.all(
-        chats.map((chat) =>
-          redisClient
-            .get(`unread:${userId}:${chat.id}`)
-            .then((count) => (count !== null ? parseInt(count) : 0))
-        )
-      );
-    } else {
-      // Pake mget kalau ada member lain
+    // Ambil status online dan unread count
+    let onlineStatuses = [];
+    let unreadCounts = [];
+
+    if (otherMemberIds.length > 0) {
       onlineStatuses = await redisClient.mget(
         otherMemberIds.map((id) => `online:${id}`)
       );
-      const unreadCountKeys = chats.map(
-        (chat) => `unread:${userId}:${chat.id}`
+      unreadCounts = await redisClient.mget(
+        chats.map((chat) => `unread:${userId}:${chat.id}`)
       );
-      unreadCounts = await redisClient.mget(unreadCountKeys);
+    } else {
+      // Kalau gak ada other members, set online false dan ambil unreadCount per chat
+      onlineStatuses = chats.map(() => "false");
+      unreadCounts = await Promise.all(
+        chats.map(async (chat) => {
+          const count = await redisClient.get(`unread:${userId}:${chat.id}`);
+          return count !== null ? count : "0";
+        })
+      );
     }
 
-    // Format data
+    // Format history chat teman
     const formattedChats = chats.map((chat, index) => {
       const otherMembers = chat.members.filter((m) => m.userId !== userId);
       const lastMessage = chat.messages[0];
@@ -99,38 +95,34 @@ const getAllChatFriends = async (req, res) => {
 
       if (messageType === "image") content = "📷 Foto";
 
-      const created = lastMessage
-        ? dayjs(lastMessage.createdAt).tz(timezone)
-        : null;
       let time = "";
-      if (created) {
+      if (lastMessage?.createdAt) {
+        const created = dayjs(lastMessage.createdAt).tz(timezone);
         if (created.isToday()) time = created.format("HH:mm");
         else if (created.isYesterday()) time = "Kemarin";
         else time = created.format("DD-MM-YYYY");
       }
 
-      const isOnline =
-        otherMemberIds.length > 0 ? onlineStatuses[index] === "true" : false;
-      let unreadCount =
-        otherMemberIds.length > 0
-          ? parseInt(unreadCounts[index] || "0")
-          : unreadCounts[index] !== null
-          ? unreadCounts[index]
-          : 0;
-      if (unreadCount === 0 && lastMessage?.senderId === userId) {
+      // Parse online status & unread count
+      const isOnline = onlineStatuses[index] === "true";
+      let unreadCount = parseInt(unreadCounts[index] || "0", 10);
+      if (unreadCount === 0 && lastMessage?.senderId === userId)
         unreadCount = 0;
-      }
 
       return {
         id: chat.id,
-        userId: otherMembers[0]?.user.id,
+        userId: otherMembers[0]?.user.id || null,
         type: chat.type,
         name: otherMembers[0]?.user.username || "Unknown User",
         image: otherMembers[0]?.user.image || null,
         lastMessage: lastMessage
-          ? { content, sender: lastMessage.sender.username, time }
+          ? {
+              content,
+              sender: lastMessage.sender.username,
+              time,
+            }
           : null,
-        unreadCount: unreadCount || 0,
+        unreadCount,
         isOnline,
       };
     });
@@ -156,12 +148,13 @@ const getAllChatGroups = async (req, res) => {
   const { timezone = "Asia/Jakarta" } = req.query;
 
   try {
+    // Ambil semua grup chat user
     const chats = await prisma.chat.findMany({
       where: {
         type: "group",
         members: {
           some: {
-            userId: userId,
+            userId,
             isArchived: false,
           },
         },
@@ -198,58 +191,34 @@ const getAllChatGroups = async (req, res) => {
       },
     });
 
-    // Ambil otherMemberIds dan cek kalau ada
-    const otherMemberIds = chats
-      .map((chat) => chat.members.find((m) => m.userId !== userId)?.user.id)
-      .filter(Boolean);
-    let unreadCounts;
+    // Ambil semua unread count dari Redis sekaligus
+    const unreadKeys = chats.map((chat) => `unread:${userId}:${chat.id}`);
+    let unreadCountsRaw = [];
 
-    if (otherMemberIds.length === 0) {
-      unreadCounts = await Promise.all(
-        chats.map((chat) =>
-          redisClient
-            .get(`unread:${userId}:${chat.id}`)
-            .then((count) => (count !== null ? parseInt(count) : 0))
-        )
-      );
-    } else {
-      const unreadCountKeys = chats.map(
-        (chat) => `unread:${userId}:${chat.id}`
-      );
-      unreadCounts = await redisClient.mget(unreadCountKeys);
+    if (unreadKeys.length > 0) {
+      unreadCountsRaw = await redisClient.mget(unreadKeys);
     }
 
-    // Format data
+    // Format history chat grup
     const formattedChats = chats.map((chat, index) => {
-      const otherMembers = chat.members.filter((m) => m.userId !== userId);
       const lastMessage = chat.messages[0];
       let content = lastMessage?.content;
       const messageType = lastMessage?.messageType;
 
       if (messageType === "image") content = "📷 Foto";
 
-      const created = lastMessage
-        ? dayjs(lastMessage.createdAt).tz(timezone)
-        : null;
       let time = "";
-      if (created) {
-        if (created.isToday()) {
-          time = created.format("HH:mm");
-        } else if (created.isYesterday()) {
-          time = "Kemarin";
-        } else {
-          time = created.format("DD-MM-YYYY");
-        }
+      if (lastMessage?.createdAt) {
+        const created = dayjs(lastMessage.createdAt).tz(timezone);
+        if (created.isToday()) time = created.format("HH:mm");
+        else if (created.isYesterday()) time = "Kemarin";
+        else time = created.format("DD-MM-YYYY");
       }
 
-      let unreadCount =
-        otherMemberIds.length > 0
-          ? parseInt(unreadCounts[index] || "0")
-          : unreadCounts[index] !== null
-          ? unreadCounts[index]
-          : 0;
+      // Parse unreadCount
+      let unreadCount = parseInt(unreadCountsRaw[index] || "0", 10);
       if (unreadCount === 0 && lastMessage?.senderId === userId) {
-        unreadCount = 0;
+        unreadCount = 0; // Kiriman sendiri, anggap udah dibaca
       }
 
       return {
@@ -261,10 +230,10 @@ const getAllChatGroups = async (req, res) => {
           ? {
               content,
               sender: lastMessage.sender.username,
-              time: time,
+              time,
             }
           : null,
-        unreadCount: unreadCount || 0,
+        unreadCount,
       };
     });
 
@@ -274,7 +243,7 @@ const getAllChatGroups = async (req, res) => {
       data: formattedChats,
     });
   } catch (error) {
-    console.error(error);
+    console.error("Error in getAllChatGroups:", error);
     return res.status(500).json({
       success: false,
       message: "Error retrieving chats",
@@ -390,28 +359,36 @@ const createGroupChat = async (req, res) => {
   const { name, memberIds } = req.body;
   const image = req.file;
 
-  // console.log(memberIds);
-
-  // Parse memberIds dari string JSON ke array
-  let parsedMemberIds = [];
-  parsedMemberIds = JSON.parse(memberIds); // Ubah string "[...]" menjadi array
-  if (!Array.isArray(parsedMemberIds)) {
-    throw new Error("memberIds must be an array");
-  }
-
-  // console.log(parsedMemberIds);
-
   try {
-    // Termasuk user sendiri
-    const uniqueMemberIds = [...new Set([userId, ...parsedMemberIds])];
-    // console.log(uniqueMemberIds);
+    // Parse memberIds
+    let parsedMemberIds;
+    try {
+      parsedMemberIds = JSON.parse(memberIds);
+      if (!Array.isArray(parsedMemberIds)) {
+        return res.status(400).json({
+          success: false,
+          message: "memberIds must be an array",
+        });
+      }
+    } catch (parseError) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid memberIds JSON format",
+      });
+    }
 
-    // Upload image ke cloudinary
+    // Unique ID (termasuk pembuat grup)
+    const uniqueMemberIds = [...new Set([userId, ...parsedMemberIds])];
+
+    // Upload icon jika ada
     let icon = null;
     if (image) {
-      const imageUrl = await uploadToCloudinary(image.path);
-      icon = imageUrl;
-      fs.unlinkSync(image.path);
+      try {
+        icon = await uploadToCloudinary(image.path);
+      } finally {
+        // Pastikan file lokal dihapus
+        fs.unlinkSync(image.path);
+      }
     }
 
     // Buat grup chat
@@ -442,8 +419,8 @@ const createGroupChat = async (req, res) => {
       },
     });
 
-    // Semua member masuk room
-    for (const memberId of uniqueMemberIds) {
+    // Emit "newGroupChat" ke semua member secara paralel
+    const emitTasks = uniqueMemberIds.map(async (memberId) => {
       const socketId = await getSocketId(memberId);
       if (socketId) {
         io.to(socketId).emit("newGroupChat", {
@@ -459,7 +436,9 @@ const createGroupChat = async (req, res) => {
           })),
         });
       }
-    }
+    });
+
+    await Promise.all(emitTasks);
 
     return res.status(201).json({
       success: true,
@@ -469,16 +448,16 @@ const createGroupChat = async (req, res) => {
         name: newGroupChat.name,
         icon: newGroupChat.icon,
         description: newGroupChat.description,
-        members: newGroupChat.members.map((member) => ({
-          userId: member.user.id,
-          username: member.user.username,
-          image: member.user.image,
-          role: member.role,
+        members: newGroupChat.members.map((m) => ({
+          userId: m.user.id,
+          username: m.user.username,
+          image: m.user.image,
+          role: m.role,
         })),
       },
     });
   } catch (error) {
-    console.error(error);
+    console.error("Error in createGroupChat:", error);
     return res.status(500).json({
       success: false,
       message: "Error creating group chat",
@@ -511,6 +490,8 @@ const getListGroupChat = async (req, res) => {
               select: {
                 id: true,
                 username: true,
+                first_name: true,
+                last_name: true,
                 image: true,
               },
             },
@@ -534,9 +515,11 @@ const getListGroupChat = async (req, res) => {
       members: groupChat.members.map((member) => ({
         userId: member.user.id,
         username: member.user.username,
+        fullname: member.user.first_name + " " + member.user.last_name,
         image: member.user.image,
         role: member.role,
       })),
+      totalMembers: groupChat.members.length,
     };
 
     return res.status(200).json({
@@ -562,13 +545,9 @@ const updateGroupChat = async (req, res) => {
   const image = req.file;
 
   try {
-    // Cek apakah user adalah admin
+    // Validasi admin
     const userMembership = await prisma.chatMember.findFirst({
-      where: {
-        chatId,
-        userId,
-        role: "admin",
-      },
+      where: { chatId, userId, role: "admin" },
     });
 
     if (!userMembership) {
@@ -578,53 +557,48 @@ const updateGroupChat = async (req, res) => {
       });
     }
 
-    // Cek icon grup
-    const latestGroup = await prisma.chat.findUnique({
-      where: {
-        id: chatId,
-      },
-      select: {
-        icon: true,
-      },
-    });
-
-    // Upload image ke cloudinary
+    // Ambil icon lama
+    let oldIcon = null;
     if (image) {
-      if (latestGroup.icon !== null) {
-        const publicId = latestGroup.icon
-          .split("/")
-          .slice(-2)
-          .join("/")
-          .replace(/\.[^.]+$/, "");
-        await cloudinary.uploader.destroy(publicId);
-      }
+      const chat = await prisma.chat.findUnique({
+        where: { id: chatId },
+        select: { icon: true },
+      });
 
-      // Upload icon baru
+      oldIcon = chat?.icon;
+    }
+
+    // Hapus icon lama jika ada
+    if (image && oldIcon) {
+      const publicId = oldIcon
+        .split("/")
+        .slice(-2)
+        .join("/")
+        .replace(/\.[^.]+$/, "");
+      await cloudinary.uploader.destroy(publicId);
+    }
+
+    // Upload icon baru
+    if (image) {
       const imageUrl = await uploadToCloudinary(image.path);
       data.icon = imageUrl;
       fs.unlinkSync(image.path);
     }
 
-    // Update grup chat
+    // Update chat
     const updatedGroupChat = await prisma.chat.update({
-      where: {
-        id: chatId,
-      },
+      where: { id: chatId },
       data,
     });
 
-    // Semua member masuk room
+    // Emit update ke semua member
     const members = await prisma.chatMember.findMany({
-      where: {
-        chatId,
-      },
-      select: {
-        userId: true,
-      },
+      where: { chatId },
+      select: { userId: true },
     });
 
-    for (const member of members) {
-      const socketId = await getSocketId(member.userId);
+    const emitTasks = members.map(async ({ userId }) => {
+      const socketId = await getSocketId(userId);
       if (socketId) {
         io.to(socketId).emit("updatedGroupChat", {
           id: updatedGroupChat.id,
@@ -633,7 +607,9 @@ const updateGroupChat = async (req, res) => {
           description: updatedGroupChat.description,
         });
       }
-    }
+    });
+
+    await Promise.all(emitTasks);
 
     return res.status(200).json({
       success: true,
@@ -646,7 +622,7 @@ const updateGroupChat = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(error);
+    console.error("Error in updateGroupChat:", error);
     return res.status(500).json({
       success: false,
       message: "Error updating group chat",
@@ -662,7 +638,7 @@ const addGroupMembers = async (req, res) => {
   const { memberIds } = req.body;
 
   try {
-    // Cek apakah user adalah admin
+    // Validasi admin
     const userMembership = await prisma.chatMember.findFirst({
       where: {
         chatId,
@@ -678,7 +654,7 @@ const addGroupMembers = async (req, res) => {
       });
     }
 
-    // Tambah member
+    // Tambah member sekaligus
     const newMembers = await prisma.chatMember.createMany({
       data: memberIds.map((memberId) => ({
         chatId,
@@ -688,16 +664,24 @@ const addGroupMembers = async (req, res) => {
       })),
     });
 
-    // Semua member masuk room
-    for (const memberId of memberIds) {
+    // Ambil nama grup hanya sekali
+    const chat = await prisma.chat.findUnique({
+      where: { id: chatId },
+      select: { name: true },
+    });
+
+    // Emit paralel ke semua member baru
+    const emitTasks = memberIds.map(async (memberId) => {
       const socketId = await getSocketId(memberId);
       if (socketId) {
         io.to(socketId).emit("addedToGroup", {
           chatId,
-          name: (await prisma.chat.findUnique({ where: { id: chatId } })).name,
+          name: chat.name,
         });
       }
-    }
+    });
+
+    await Promise.all(emitTasks);
 
     return res.status(200).json({
       success: true,
@@ -707,7 +691,7 @@ const addGroupMembers = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(error);
+    console.error("Error in addGroupMembers:", error);
     return res.status(500).json({
       success: false,
       message: "Error adding members to group",
@@ -767,7 +751,7 @@ const getChatMessages = async (req, res) => {
       },
     });
 
-    // Ambil semua pesan
+    // Ambil semua pesan sekaligus
     const messages = await prisma.message.findMany({
       where: messageWhereClause,
       include: {
@@ -777,40 +761,32 @@ const getChatMessages = async (req, res) => {
       orderBy: { createdAt: "asc" },
     });
 
-    // Tandai pesan yang belum dibaca sebagai dibaca
-    const unreadMessages = await prisma.message.findMany({
-      where: {
-        chatId,
-        ...messageWhereClause,
-        NOT: {
-          reads: {
-            some: { userId },
-          },
-        },
-      },
-      select: { id: true },
-    });
+    // Filter unread tanpa query baru
+    const unreadMessages = messages.filter(
+      (msg) => !msg.reads.some((read) => read.userId === userId)
+    );
 
     if (unreadMessages.length > 0) {
-      await prisma.messageRead.createMany({
-        data: unreadMessages.map((msg) => ({
-          messageId: msg.id,
-          userId: userId,
-          readAt: new Date(),
-        })),
-      });
-
-      // Set unreadCount ke 0 di database dan Redis
+      await Promise.all([
+        prisma.messageRead.createMany({
+          data: unreadMessages.map((msg) => ({
+            messageId: msg.id,
+            userId,
+            readAt: new Date(),
+          })),
+        }),
+        prisma.chatMember.update({
+          where: { chatId_userId: { chatId, userId } },
+          data: { unreadCount: 0, lastReadAt: new Date() },
+        }),
+        redisClient.set(`unread:${userId}:${chatId}`, 0, "EX", 3600),
+        io.to(chatId).emit("unreadCountUpdate", { chatId, userId }),
+      ]);
+    } else {
+      // Tetap update lastReadAt
       await prisma.chatMember.update({
         where: { chatId_userId: { chatId, userId } },
-        data: { unreadCount: 0 },
-      });
-      await redisClient.set(`unread:${userId}:${chatId}`, 0, "EX", 3600);
-
-      // Emit event Socket.IO ke semua member chat
-      io.to(chatId).emit("unreadCountUpdate", {
-        chatId,
-        userId,
+        data: { lastReadAt: new Date() },
       });
     }
 
@@ -884,12 +860,6 @@ const getChatMessages = async (req, res) => {
         dayjs(b.date, "DD-MM-YYYY").valueOf() -
         dayjs(a.date, "DD-MM-YYYY").valueOf()
       );
-    });
-
-    // Update last read
-    await prisma.chatMember.update({
-      where: { chatId_userId: { chatId, userId } },
-      data: { lastReadAt: new Date() },
     });
 
     if (chat.type === "nearby") {
@@ -1148,10 +1118,7 @@ const joinChat = async (socket, io, { chatId }) => {
       where: { chatId, userId, isArchived: false },
     });
 
-    if (!chatMember) {
-      console.log(`User ${userId} is not a member of chat ${chatId}`);
-      return;
-    }
+    if (!chatMember) return;
 
     socket.join(chatId);
     console.log(`User ${userId} joined chat room: ${chatId}`);
@@ -1167,18 +1134,20 @@ const joinChat = async (socket, io, { chatId }) => {
 
     // Kirim userStatusUpdate ke anggota lain di chat
     const otherMembers = chat.members.filter((m) => m.userId !== userId);
-    for (const member of otherMembers) {
-      const socketId = await redisClient.get(`user:${member.userId}`);
-      if (socketId) {
-        io.to(socketId).emit("userStatusUpdate", {
-          userId,
-          username,
-          isOnline: true,
-          chatId,
-          chatType: chat.type,
-        });
-      }
-    }
+    await Promise.all(
+      otherMembers.map(async (member) => {
+        const socketId = await redisClient.get(`user:${member.userId}`);
+        if (socketId) {
+          io.to(socketId).emit("userStatusUpdate", {
+            userId,
+            username,
+            isOnline: true,
+            chatId,
+            chatType: chat.type,
+          });
+        }
+      })
+    );
   } catch (error) {
     console.error("Error joining chat:", error);
   }
@@ -1256,12 +1225,6 @@ const sendNotification = async (receiverId, title, body, chatId) => {
     where: { id: receiverId },
     select: { username: true, fcmTokens: true },
   });
-
-  console.log(
-    "Receiver username & fcmTokens:",
-    receiver.username,
-    receiver.fcmTokens
-  );
 
   if (receiver?.fcmTokens?.length > 0) {
     const message = {
@@ -1868,8 +1831,7 @@ const getAllChatNearby = async (req, res) => {
     let unreadCounts;
 
     if (otherMemberIds.length === 0) {
-      // Kalau gak ada member lain, set status online manual dan ambil unreadCount
-      // onlineStatuses = chats.map(() => false);
+      // Kalau gak ada member lain ambil unreadCount
       unreadCounts = await Promise.all(
         chats.map((chat) =>
           redisClient
@@ -1879,9 +1841,6 @@ const getAllChatNearby = async (req, res) => {
       );
     } else {
       // Pake mget kalau ada member lain
-      // onlineStatuses = await redisClient.mget(
-      //   otherMemberIds.map((id) => `online:${id}`)
-      // );
       const unreadCountKeys = chats.map(
         (chat) => `unread:${userId}:${chat.id}`
       );
@@ -1907,8 +1866,6 @@ const getAllChatNearby = async (req, res) => {
         else time = created.format("DD-MM-YYYY");
       }
 
-      // const isOnline =
-      //   otherMemberIds.length > 0 ? onlineStatuses[index] === "true" : false;
       let unreadCount =
         otherMemberIds.length > 0
           ? parseInt(unreadCounts[index] || "0")
@@ -1939,7 +1896,6 @@ const getAllChatNearby = async (req, res) => {
           : null,
         unreadCount: unreadCount || 0,
         status,
-        // isOnline,
       };
     });
 
