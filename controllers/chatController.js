@@ -515,7 +515,10 @@ const getListGroupChat = async (req, res) => {
       members: groupChat.members.map((member) => ({
         userId: member.user.id,
         username: member.user.username,
-        fullname: member.user.first_name + " " + member.user.last_name,
+        fullname:
+          member.user.fistname !== null && member.user.last_name !== null
+            ? `${member.user.first_name} ${member.user.last_name}`
+            : "",
         image: member.user.image,
         role: member.role,
       })),
