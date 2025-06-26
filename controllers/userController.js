@@ -285,15 +285,29 @@ const sendFriendRequest = async (req, res) => {
 
     // Kirim notifikasi ke penerima
     const receiverSocketId = await getSocketId(receiverId);
+    // if (receiverSocketId) {
+    //   io.to(receiverSocketId).emit("friendRequest", {
+    //     requestId: friendRequest.id,
+    //     senderId: userId,
+    //     username: friendRequest.sender.username,
+    //     image: friendRequest.sender.image ?? null,
+    //     date: dayjs(friendRequest.createdAt).tz(timezone).format("DD-MM-YYYY"),
+    //     time: dayjs(friendRequest.createdAt).tz(timezone).format("HH:mm"),
+    //   });
+    // }
     if (receiverSocketId) {
-      io.to(receiverSocketId).emit("friendRequest", {
-        requestId: friendRequest.id,
-        senderId: userId,
-        username: friendRequest.sender.username,
-        image: friendRequest.sender.image ?? null,
-        date: dayjs(friendRequest.createdAt).tz(timezone).format("DD-MM-YYYY"),
-        time: dayjs(friendRequest.createdAt).tz(timezone).format("HH:mm"),
-      });
+      for (const sid of receiverSocketId) {
+        io.to(sid).emit("friendRequest", {
+          requestId: friendRequest.id,
+          senderId: userId,
+          username: friendRequest.sender.username,
+          image: friendRequest.sender.image ?? null,
+          date: dayjs(friendRequest.createdAt)
+            .tz(timezone)
+            .format("DD-MM-YYYY"),
+          time: dayjs(friendRequest.createdAt).tz(timezone).format("HH:mm"),
+        });
+      }
     }
 
     return res.status(200).json({
@@ -433,24 +447,44 @@ const acceptRejectFriendRequest = async (req, res) => {
 
       // Notifikasi Pengirim
       const senderSocketId = await getSocketId(senderId);
+      // if (senderSocketId) {
+      //   io.to(senderSocketId).emit("friendAccepted", {
+      //     userId: receiverId,
+      //     username: friendRequest.receiver.username,
+      //     bio: friendRequest.receiver.bio,
+      //     image: friendRequest.receiver.image,
+      //   });
+      // }
       if (senderSocketId) {
-        io.to(senderSocketId).emit("friendAccepted", {
-          userId: receiverId,
-          username: friendRequest.receiver.username,
-          bio: friendRequest.receiver.bio,
-          image: friendRequest.receiver.image,
-        });
+        for (const sid of senderSocketId) {
+          io.to(sid).emit("friendAccepted", {
+            userId: receiverId,
+            username: friendRequest.receiver.username,
+            bio: friendRequest.receiver.bio,
+            image: friendRequest.receiver.image,
+          });
+        }
       }
 
       // Notifikasi Penerima
       const receiverSocketId = await getSocketId(receiverId);
+      // if (receiverSocketId) {
+      //   io.to(receiverSocketId).emit("friendAccepted", {
+      //     userId: senderId,
+      //     username: friendRequest.sender.username,
+      //     bio: friendRequest.sender.bio,
+      //     image: friendRequest.sender.image,
+      //   });
+      // }
       if (receiverSocketId) {
-        io.to(receiverSocketId).emit("friendAccepted", {
-          userId: senderId,
-          username: friendRequest.sender.username,
-          bio: friendRequest.sender.bio,
-          image: friendRequest.sender.image,
-        });
+        for (const sid of receiverSocketId) {
+          io.to(sid).emit("friendAccepted", {
+            userId: senderId,
+            username: friendRequest.sender.username,
+            bio: friendRequest.sender.bio,
+            image: friendRequest.sender.image,
+          });
+        }
       }
 
       // Cek apakah sebelumnya sudah chat di nearby

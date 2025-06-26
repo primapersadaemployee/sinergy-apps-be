@@ -70,7 +70,8 @@ const initSocket = (server) => {
     );
 
     // Save mapping userId to socket.id in Redis
-    await redisClient.set(`user:${userId}`, socket.id);
+    // await redisClient.set(`user:${userId}`, socket.id);
+    await redisClient.sadd(`user:${userId}`, socket.id);
 
     // Save online status in Redis
     await redisClient.set(`online:${userId}`, "true", "EX", 3600);
@@ -142,8 +143,16 @@ const initSocket = (server) => {
       socket.removeAllListeners();
 
       // Hapus mapping userId dan status online di Redis
-      await redisClient.del(`user:${socket.userId}`);
-      await redisClient.del(`online:${socket.userId}`);
+      // await redisClient.del(`user:${socket.userId}`);
+      // await redisClient.del(`online:${socket.userId}`);
+      await redisClient.srem(`user:${socket.userId}`, socket.id);
+
+      const remainingSockets = await redisClient.smembers(
+        `user:${socket.userId}`
+      );
+      if (remainingSockets.length === 0) {
+        await redisClient.del(`online:${socket.userId}`);
+      }
 
       // Kirim userStatusUpdate ke anggota chat yang relevan
       const chats = await prisma.chat.findMany({
@@ -184,8 +193,25 @@ const initSocket = (server) => {
   return io;
 };
 
+// const getSocketId = async (userId) => {
+//   return await redisClient.get(`user:${userId}`);
+// };
+
+// const getSocketId = async (userId) => {
+//   return await redisClient.smembers(`user:${userId}`);
+// };
+
 const getSocketId = async (userId) => {
-  return await redisClient.get(`user:${userId}`);
+  const value = await redisClient.get(`user:${userId}`);
+
+  // Jika value adalah string, anggap itu data lama dan return sebagai array
+  if (value) {
+    return [value];
+  }
+
+  // Kalau bukan string, coba ambil dari set (data baru)
+  const ids = await redisClient.smembers(`user:${userId}`);
+  return ids || [];
 };
 
 const joinChatRoom = async (userId, chatId) => {

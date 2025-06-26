@@ -422,19 +422,35 @@ const createGroupChat = async (req, res) => {
     // Emit "newGroupChat" ke semua member secara paralel
     const emitTasks = uniqueMemberIds.map(async (memberId) => {
       const socketId = await getSocketId(memberId);
+      // if (socketId) {
+      //   io.to(socketId).emit("newGroupChat", {
+      //     id: newGroupChat.id,
+      //     name: newGroupChat.name,
+      //     icon: newGroupChat.icon,
+      //     description: newGroupChat.description,
+      //     members: newGroupChat.members.map((m) => ({
+      //       userId: m.user.id,
+      //       username: m.user.username,
+      //       image: m.user.image,
+      //       role: m.role,
+      //     })),
+      //   });
+      // }
       if (socketId) {
-        io.to(socketId).emit("newGroupChat", {
-          id: newGroupChat.id,
-          name: newGroupChat.name,
-          icon: newGroupChat.icon,
-          description: newGroupChat.description,
-          members: newGroupChat.members.map((m) => ({
-            userId: m.user.id,
-            username: m.user.username,
-            image: m.user.image,
-            role: m.role,
-          })),
-        });
+        for (const sid of socketId) {
+          io.to(sid).emit("newGroupChat", {
+            id: newGroupChat.id,
+            name: newGroupChat.name,
+            icon: newGroupChat.icon,
+            description: newGroupChat.description,
+            members: newGroupChat.members.map((m) => ({
+              userId: m.user.id,
+              username: m.user.username,
+              image: m.user.image,
+              role: m.role,
+            })),
+          });
+        }
       }
     });
 
@@ -602,13 +618,23 @@ const updateGroupChat = async (req, res) => {
 
     const emitTasks = members.map(async ({ userId }) => {
       const socketId = await getSocketId(userId);
+      // if (socketId) {
+      //   io.to(socketId).emit("updatedGroupChat", {
+      //     id: updatedGroupChat.id,
+      //     name: updatedGroupChat.name,
+      //     icon: updatedGroupChat.icon,
+      //     description: updatedGroupChat.description,
+      //   });
+      // }
       if (socketId) {
-        io.to(socketId).emit("updatedGroupChat", {
-          id: updatedGroupChat.id,
-          name: updatedGroupChat.name,
-          icon: updatedGroupChat.icon,
-          description: updatedGroupChat.description,
-        });
+        for (const sid of socketId) {
+          io.to(sid).emit("updatedGroupChat", {
+            id: updatedGroupChat.id,
+            name: updatedGroupChat.name,
+            icon: updatedGroupChat.icon,
+            description: updatedGroupChat.description,
+          });
+        }
       }
     });
 
@@ -676,11 +702,19 @@ const addGroupMembers = async (req, res) => {
     // Emit paralel ke semua member baru
     const emitTasks = memberIds.map(async (memberId) => {
       const socketId = await getSocketId(memberId);
+      // if (socketId) {
+      //   io.to(socketId).emit("addedToGroup", {
+      //     chatId,
+      //     name: chat.name,
+      //   });
+      // }
       if (socketId) {
-        io.to(socketId).emit("addedToGroup", {
-          chatId,
-          name: chat.name,
-        });
+        for (const sid of socketId) {
+          io.to(sid).emit("addedToGroup", {
+            chatId,
+            name: chat.name,
+          });
+        }
       }
     });
 
@@ -1098,9 +1132,14 @@ const startPrivateChat = async (socket, io, { userId, friendId }, callback) => {
     };
 
     try {
-      const socketId = await redisClient.get(`user:${userId}`);
+      const socketId = await getSocketId(userId);
+      // if (socketId) {
+      //   io.to(socketId).emit("newPrivateChat", formattedNewPrivateChat);
+      // }
       if (socketId) {
-        io.to(socketId).emit("newPrivateChat", formattedNewPrivateChat);
+        for (const sid of socketId) {
+          io.to(sid).emit("newPrivateChat", formattedNewPrivateChat);
+        }
       }
     } catch (error) {
       console.error("Error sending newPrivateChat event:", error);
@@ -1139,15 +1178,27 @@ const joinChat = async (socket, io, { chatId }) => {
     const otherMembers = chat.members.filter((m) => m.userId !== userId);
     await Promise.all(
       otherMembers.map(async (member) => {
-        const socketId = await redisClient.get(`user:${member.userId}`);
+        // const socketId = await redisClient.get(`user:${member.userId}`);
+        const socketId = await getSocketId(member.userId);
+        // if (socketId) {
+        //   io.to(socketId).emit("userStatusUpdate", {
+        //     userId,
+        //     username,
+        //     isOnline: true,
+        //     chatId,
+        //     chatType: chat.type,
+        //   });
+        // }
         if (socketId) {
-          io.to(socketId).emit("userStatusUpdate", {
-            userId,
-            username,
-            isOnline: true,
-            chatId,
-            chatType: chat.type,
-          });
+          for (const sid of socketId) {
+            io.to(sid).emit("userStatusUpdate", {
+              userId,
+              username,
+              isOnline: true,
+              chatId,
+              chatType: chat.type,
+            });
+          }
         }
       })
     );
@@ -1437,12 +1488,23 @@ const sendMessage = async (
           isOnline,
         };
 
-        const socketId = await redisClient.get(`user:${memberId}`);
+        // const socketId = await redisClient.get(`user:${memberId}`);
+        const socketId = await getSocketId(memberId);
+        // if (socketId) {
+        //   io.to(socketId).emit(
+        //     chat.type === "private" ? "newLastMessage" : "newGroupLastMessage",
+        //     lastMessageMap[memberId]
+        //   );
+        // }
         if (socketId) {
-          io.to(socketId).emit(
-            chat.type === "private" ? "newLastMessage" : "newGroupLastMessage",
-            lastMessageMap[memberId]
-          );
+          for (const sid of socketId) {
+            io.to(sid).emit(
+              chat.type === "private"
+                ? "newLastMessage"
+                : "newGroupLastMessage",
+              lastMessageMap[memberId]
+            );
+          }
         }
       })
     );
@@ -1549,9 +1611,15 @@ const startNearbyChat = async (socket, io, { userId, peopleId }, callback) => {
       isOnline: people.isOnline ?? false,
     };
 
-    const socketId = await redisClient.get(`user:${userId}`);
+    // const socketId = await redisClient.get(`user:${userId}`);
+    const socketId = await getSocketId(userId);
+    // if (socketId) {
+    //   io.to(socketId).emit("newNearbyChat", formattedNewNearbyChat);
+    // }
     if (socketId) {
-      io.to(socketId).emit("newNearbyChat", formattedNewNearbyChat);
+      for (const sid of socketId) {
+        io.to(sid).emit("newNearbyChat", formattedNewNearbyChat);
+      }
     }
   } catch (error) {
     console.error("Error starting nearby chat:", error);
@@ -1736,12 +1804,21 @@ const sendNearbyMessage = async (
     // Emit newNearbyLastMessage ke semua member
     await Promise.all(
       chat.members.map(async (member) => {
-        const socketId = await redisClient.get(`user:${member.userId}`);
+        // const socketId = await redisClient.get(`user:${member.userId}`);
+        const socketId = await getSocketId(member.userId);
+        // if (socketId) {
+        //   io.to(socketId).emit(
+        //     "newNearbyLastMessage",
+        //     formattedLastMessages[member.userId]
+        //   );
+        // }
         if (socketId) {
-          io.to(socketId).emit(
-            "newNearbyLastMessage",
-            formattedLastMessages[member.userId]
-          );
+          for (const sid of socketId) {
+            io.to(sid).emit(
+              "newNearbyLastMessage",
+              formattedLastMessages[member.userId]
+            );
+          }
         }
       })
     );
