@@ -12,6 +12,7 @@ import cron from "node-cron";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
+import gameRouter from "./routes/gameRoute.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,8 +32,8 @@ app.use(
 
 // Rate Limiter
 const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 menit
-  max: 100, // Batasi setiap IP hingga 100 request per 'windowMs'
+  windowMs: 1 * 60 * 1000, // 1 menit
+  max: 1000, // Batasi setiap IP hingga 1000 request per 'windowMs'
   standardHeaders: true, // Kirim header 'RateLimit-*'
   legacyHeaders: false, // Nonaktifkan header 'X-RateLimit-*'
   message: {
@@ -53,6 +54,7 @@ cron.schedule("0 2 * * *", () => {
 app.use("/api/user", userRouter);
 app.use("/api/chat", chatRouter);
 app.use("/api/inbox", inboxRouter);
+app.use("/api/games", gameRouter);
 
 // Handle Update APK
 app.get("/updates", (req, res) => {

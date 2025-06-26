@@ -422,36 +422,36 @@ const createGroupChat = async (req, res) => {
     // Emit "newGroupChat" ke semua member secara paralel
     const emitTasks = uniqueMemberIds.map(async (memberId) => {
       const socketId = await getSocketId(memberId);
-      if (socketId) {
-        io.to(socketId).emit("newGroupChat", {
-          id: newGroupChat.id,
-          name: newGroupChat.name,
-          icon: newGroupChat.icon,
-          description: newGroupChat.description,
-          members: newGroupChat.members.map((m) => ({
-            userId: m.user.id,
-            username: m.user.username,
-            image: m.user.image,
-            role: m.role,
-          })),
-        });
-      }
       // if (socketId) {
-      //   for (const sid of socketId) {
-      //     io.to(sid).emit("newGroupChat", {
-      //       id: newGroupChat.id,
-      //       name: newGroupChat.name,
-      //       icon: newGroupChat.icon,
-      //       description: newGroupChat.description,
-      //       members: newGroupChat.members.map((m) => ({
-      //         userId: m.user.id,
-      //         username: m.user.username,
-      //         image: m.user.image,
-      //         role: m.role,
-      //       })),
-      //     });
-      //   }
+      //   io.to(socketId).emit("newGroupChat", {
+      //     id: newGroupChat.id,
+      //     name: newGroupChat.name,
+      //     icon: newGroupChat.icon,
+      //     description: newGroupChat.description,
+      //     members: newGroupChat.members.map((m) => ({
+      //       userId: m.user.id,
+      //       username: m.user.username,
+      //       image: m.user.image,
+      //       role: m.role,
+      //     })),
+      //   });
       // }
+      if (socketId) {
+        for (const sid of socketId) {
+          io.to(sid).emit("newGroupChat", {
+            id: newGroupChat.id,
+            name: newGroupChat.name,
+            icon: newGroupChat.icon,
+            description: newGroupChat.description,
+            members: newGroupChat.members.map((m) => ({
+              userId: m.user.id,
+              username: m.user.username,
+              image: m.user.image,
+              role: m.role,
+            })),
+          });
+        }
+      }
     });
 
     await Promise.all(emitTasks);
@@ -618,24 +618,24 @@ const updateGroupChat = async (req, res) => {
 
     const emitTasks = members.map(async ({ userId }) => {
       const socketId = await getSocketId(userId);
-      if (socketId) {
-        io.to(socketId).emit("updatedGroupChat", {
-          id: updatedGroupChat.id,
-          name: updatedGroupChat.name,
-          icon: updatedGroupChat.icon,
-          description: updatedGroupChat.description,
-        });
-      }
       // if (socketId) {
-      //   for (const sid of socketId) {
-      //     io.to(sid).emit("updatedGroupChat", {
-      //       id: updatedGroupChat.id,
-      //       name: updatedGroupChat.name,
-      //       icon: updatedGroupChat.icon,
-      //       description: updatedGroupChat.description,
-      //     });
-      //   }
+      //   io.to(socketId).emit("updatedGroupChat", {
+      //     id: updatedGroupChat.id,
+      //     name: updatedGroupChat.name,
+      //     icon: updatedGroupChat.icon,
+      //     description: updatedGroupChat.description,
+      //   });
       // }
+      if (socketId) {
+        for (const sid of socketId) {
+          io.to(sid).emit("updatedGroupChat", {
+            id: updatedGroupChat.id,
+            name: updatedGroupChat.name,
+            icon: updatedGroupChat.icon,
+            description: updatedGroupChat.description,
+          });
+        }
+      }
     });
 
     await Promise.all(emitTasks);
@@ -702,20 +702,20 @@ const addGroupMembers = async (req, res) => {
     // Emit paralel ke semua member baru
     const emitTasks = memberIds.map(async (memberId) => {
       const socketId = await getSocketId(memberId);
-      if (socketId) {
-        io.to(socketId).emit("addedToGroup", {
-          chatId,
-          name: chat.name,
-        });
-      }
       // if (socketId) {
-      //   for (const sid of socketId) {
-      //     io.to(sid).emit("addedToGroup", {
-      //       chatId,
-      //       name: chat.name,
-      //     });
-      //   }
+      //   io.to(socketId).emit("addedToGroup", {
+      //     chatId,
+      //     name: chat.name,
+      //   });
       // }
+      if (socketId) {
+        for (const sid of socketId) {
+          io.to(sid).emit("addedToGroup", {
+            chatId,
+            name: chat.name,
+          });
+        }
+      }
     });
 
     await Promise.all(emitTasks);
@@ -964,8 +964,13 @@ const toggleArchiveChat = async (req, res) => {
 
     if (!archive) {
       const socketId = await getSocketId(userId);
+      // if (socketId) {
+      //   io.to(socketId).emit("unarchivedChat", { chatId });
+      // }
       if (socketId) {
-        io.to(socketId).emit("unarchivedChat", { chatId });
+        for (const sid of socketId) {
+          io.to(sid).emit("unarchivedChat", { chatId });
+        }
       }
     }
 
@@ -1018,8 +1023,13 @@ const clearMyChatHistory = async (req, res) => {
 
     // Kirim event ke socket
     const userSocketId = await getSocketId(userId);
+    // if (userSocketId) {
+    //   io.to(userSocketId).emit("clearChatHistory", chatId);
+    // }
     if (userSocketId) {
-      io.to(userSocketId).emit("clearChatHistory", chatId);
+      for (const sid of userSocketId) {
+        io.to(sid).emit("clearChatHistory", chatId);
+      }
     }
 
     return res.status(200).json({
@@ -1133,14 +1143,14 @@ const startPrivateChat = async (socket, io, { userId, friendId }, callback) => {
 
     try {
       const socketId = await getSocketId(userId);
-      if (socketId) {
-        io.to(socketId).emit("newPrivateChat", formattedNewPrivateChat);
-      }
       // if (socketId) {
-      //   for (const sid of socketId) {
-      //     io.to(sid).emit("newPrivateChat", formattedNewPrivateChat);
-      //   }
+      //   io.to(socketId).emit("newPrivateChat", formattedNewPrivateChat);
       // }
+      if (socketId) {
+        for (const sid of socketId) {
+          io.to(sid).emit("newPrivateChat", formattedNewPrivateChat);
+        }
+      }
     } catch (error) {
       console.error("Error sending newPrivateChat event:", error);
     }
@@ -1178,28 +1188,27 @@ const joinChat = async (socket, io, { chatId }) => {
     const otherMembers = chat.members.filter((m) => m.userId !== userId);
     await Promise.all(
       otherMembers.map(async (member) => {
-        // const socketId = await redisClient.get(`user:${member.userId}`);
         const socketId = await getSocketId(member.userId);
-        if (socketId) {
-          io.to(socketId).emit("userStatusUpdate", {
-            userId,
-            username,
-            isOnline: true,
-            chatId,
-            chatType: chat.type,
-          });
-        }
         // if (socketId) {
-        //   for (const sid of socketId) {
-        //     io.to(sid).emit("userStatusUpdate", {
-        //       userId,
-        //       username,
-        //       isOnline: true,
-        //       chatId,
-        //       chatType: chat.type,
-        //     });
-        //   }
+        //   io.to(socketId).emit("userStatusUpdate", {
+        //     userId,
+        //     username,
+        //     isOnline: true,
+        //     chatId,
+        //     chatType: chat.type,
+        //   });
         // }
+        if (socketId) {
+          for (const sid of socketId) {
+            io.to(sid).emit("userStatusUpdate", {
+              userId,
+              username,
+              isOnline: true,
+              chatId,
+              chatType: chat.type,
+            });
+          }
+        }
       })
     );
   } catch (error) {
@@ -1488,24 +1497,24 @@ const sendMessage = async (
           isOnline,
         };
 
-        // const socketId = await redisClient.get(`user:${memberId}`);
         const socketId = await getSocketId(memberId);
-        if (socketId) {
-          io.to(socketId).emit(
-            chat.type === "private" ? "newLastMessage" : "newGroupLastMessage",
-            lastMessageMap[memberId]
-          );
-        }
         // if (socketId) {
-        //   for (const sid of socketId) {
-        //     io.to(sid).emit(
-        //       chat.type === "private"
-        //         ? "newLastMessage"
-        //         : "newGroupLastMessage",
-        //       lastMessageMap[memberId]
-        //     );
-        //   }
+        //   io.to(socketId).emit(
+        //     chat.type === "private" ? "newLastMessage" : "newGroupLastMessage",
+        //     lastMessageMap[memberId]
+        //   );
         // }
+        if (socketId) {
+          for (const sid of socketId) {
+            console.log("sid", sid);
+            io.to(sid).emit(
+              chat.type === "private"
+                ? "newLastMessage"
+                : "newGroupLastMessage",
+              lastMessageMap[memberId]
+            );
+          }
+        }
       })
     );
 
@@ -1611,16 +1620,15 @@ const startNearbyChat = async (socket, io, { userId, peopleId }, callback) => {
       isOnline: people.isOnline ?? false,
     };
 
-    // const socketId = await redisClient.get(`user:${userId}`);
     const socketId = await getSocketId(userId);
-    if (socketId) {
-      io.to(socketId).emit("newNearbyChat", formattedNewNearbyChat);
-    }
     // if (socketId) {
-    //   for (const sid of socketId) {
-    //     io.to(sid).emit("newNearbyChat", formattedNewNearbyChat);
-    //   }
+    //   io.to(socketId).emit("newNearbyChat", formattedNewNearbyChat);
     // }
+    if (socketId) {
+      for (const sid of socketId) {
+        io.to(sid).emit("newNearbyChat", formattedNewNearbyChat);
+      }
+    }
   } catch (error) {
     console.error("Error starting nearby chat:", error);
     callback({ success: false, message: "Failed to start nearby chat" });
@@ -1804,22 +1812,21 @@ const sendNearbyMessage = async (
     // Emit newNearbyLastMessage ke semua member
     await Promise.all(
       chat.members.map(async (member) => {
-        // const socketId = await redisClient.get(`user:${member.userId}`);
         const socketId = await getSocketId(member.userId);
-        if (socketId) {
-          io.to(socketId).emit(
-            "newNearbyLastMessage",
-            formattedLastMessages[member.userId]
-          );
-        }
         // if (socketId) {
-        //   for (const sid of socketId) {
-        //     io.to(sid).emit(
-        //       "newNearbyLastMessage",
-        //       formattedLastMessages[member.userId]
-        //     );
-        //   }
+        //   io.to(socketId).emit(
+        //     "newNearbyLastMessage",
+        //     formattedLastMessages[member.userId]
+        //   );
         // }
+        if (socketId) {
+          for (const sid of socketId) {
+            io.to(sid).emit(
+              "newNearbyLastMessage",
+              formattedLastMessages[member.userId]
+            );
+          }
+        }
       })
     );
 

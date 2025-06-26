@@ -70,8 +70,8 @@ const initSocket = (server) => {
     );
 
     // Save mapping userId to socket.id in Redis
-    await redisClient.set(`user:${userId}`, socket.id);
-    // await redisClient.sadd(`user:${userId}`, socket.id);
+    // await redisClient.set(`user:${userId}`, socket.id);
+    await safeSaddUserSocket(userId, socket.id);
 
     // Save online status in Redis
     await redisClient.set(`online:${userId}`, "true", "EX", 3600);
@@ -143,16 +143,15 @@ const initSocket = (server) => {
       socket.removeAllListeners();
 
       // Hapus mapping userId dan status online di Redis
-      await redisClient.del(`user:${socket.userId}`);
-      await redisClient.del(`online:${socket.userId}`);
-      // await redisClient.srem(`user:${socket.userId}`, socket.id);
+      // await redisClient.del(`user:${socket.userId}`);
+      // await redisClient.del(`online:${socket.userId}`);
 
-      // const remainingSockets = await redisClient.smembers(
-      //   `user:${socket.userId}`
-      // );
-      // if (remainingSockets.length === 0) {
-      //   await redisClient.del(`online:${socket.userId}`);
-      // }
+      await redisClient.srem(`user:${socket.userId}`, socket.id);
+      const remaining = await redisClient.smembers(`user:${socket.userId}`);
+      if (remaining.length === 0) {
+        await redisClient.del(`user:${socket.userId}`);
+        await redisClient.del(`online:${socket.userId}`);
+      }
 
       // Kirim userStatusUpdate ke anggota chat yang relevan
       const chats = await prisma.chat.findMany({
@@ -172,15 +171,27 @@ const initSocket = (server) => {
           (m) => m.userId !== socket.userId
         );
         for (const member of otherMembers) {
-          const socketId = await redisClient.get(`user:${member.userId}`);
+          // const socketId = await redisClient.get(`user:${member.userId}`);
+          const socketId = await redisClient.smembers(`user:${member.userId}`);
+          // if (socketId) {
+          //   io.to(socketId).emit("userStatusUpdate", {
+          //     userId: socket.userId,
+          //     username: socket.username,
+          //     isOnline: false,
+          //     chatId: chat.id,
+          //     chatType: chat.type,
+          //   });
+          // }
           if (socketId) {
-            io.to(socketId).emit("userStatusUpdate", {
-              userId: socket.userId,
-              username: socket.username,
-              isOnline: false,
-              chatId: chat.id,
-              chatType: chat.type,
-            });
+            for (const sid of socketId) {
+              io.to(sid).emit("userStatusUpdate", {
+                userId: socket.userId,
+                username: socket.username,
+                isOnline: false,
+                chatId: chat.id,
+                chatType: chat.type,
+              });
+            }
           }
         }
       }
@@ -193,26 +204,20 @@ const initSocket = (server) => {
   return io;
 };
 
+// const getSocketId = async (userId) => {
+//   return await redisClient.get(`user:${userId}`);
+// };
+
 const getSocketId = async (userId) => {
-  return await redisClient.get(`user:${userId}`);
+  const type = await redisClient.type(`user:${userId}`);
+  if (type === "string") {
+    const old = await redisClient.get(`user:${userId}`);
+    await redisClient.del(`user:${userId}`);
+    await redisClient.sadd(`user:${userId}`, old);
+    return [old];
+  }
+  return await redisClient.smembers(`user:${userId}`);
 };
-
-// const getSocketId = async (userId) => {
-//   return await redisClient.smembers(`user:${userId}`);
-// };
-
-// const getSocketId = async (userId) => {
-//   const value = await redisClient.get(`user:${userId}`);
-
-//   // Jika value adalah string, anggap itu data lama dan return sebagai array
-//   if (value) {
-//     return [value];
-//   }
-
-//   // Kalau bukan string, coba ambil dari set (data baru)
-//   const ids = await redisClient.smembers(`user:${userId}`);
-//   return ids || [];
-// };
 
 const joinChatRoom = async (userId, chatId) => {
   const socketId = await getSocketId(userId);
@@ -234,6 +239,19 @@ const leaveChatRoom = async (userId, chatId) => {
       console.log(`User ${userId} left chat room: ${chatId}`);
     }
   }
+};
+
+const safeSaddUserSocket = async (userId, socketId) => {
+  const key = `user:${userId}`;
+  const type = await redisClient.type(key);
+
+  if (type === "string") {
+    const oldSocket = await redisClient.get(key);
+    await redisClient.del(key);
+    await redisClient.sadd(key, oldSocket);
+  }
+
+  await redisClient.sadd(key, socketId);
 };
 
 export { initSocket, getSocketId, io, joinChatRoom, leaveChatRoom };
