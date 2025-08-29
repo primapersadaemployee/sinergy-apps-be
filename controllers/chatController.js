@@ -34,11 +34,6 @@ const getAllChatFriends = async (req, res) => {
       },
       include: {
         members: {
-          where: {
-            user: {
-              isNot: null,
-            },
-          },
           include: {
             user: {
               select: {
@@ -66,7 +61,7 @@ const getAllChatFriends = async (req, res) => {
 
     // Cari userId teman dalam tiap chat
     const otherMemberIds = chats
-      .map((chat) => chat.members.find((m) => m.userId !== userId && m.user)?.user?.id)
+      .map((chat) => chat.members.find((m) => m.userId !== userId)?.user.id)
       .filter(Boolean);
 
     // Ambil status online dan unread count
@@ -92,51 +87,46 @@ const getAllChatFriends = async (req, res) => {
     }
 
     // Format history chat teman
-    const formattedChats = chats
-      .map((chat, index) => {
-        const otherMembers = chat.members.filter((m) => m.userId !== userId && m.user);
-        
-        // Skip chat jika tidak ada member lain yang valid
-        if (otherMembers.length === 0) return null;
-        
-        const lastMessage = chat.messages[0];
-        let content = lastMessage?.content;
-        const messageType = lastMessage?.messageType;
+    const formattedChats = chats.map((chat, index) => {
+      const otherMembers = chat.members.filter((m) => m.userId !== userId);
 
-        if (messageType === "image") content = "📷 Foto";
+      const lastMessage = chat.messages[0];
+      let content = lastMessage?.content;
+      const messageType = lastMessage?.messageType;
 
-        let time = "";
-        if (lastMessage?.createdAt) {
-          const created = dayjs(lastMessage.createdAt).tz(timezone);
-          if (created.isToday()) time = created.format("HH:mm");
-          else if (created.isYesterday()) time = "Kemarin";
-          else time = created.format("DD-MM-YYYY");
-        }
+      if (messageType === "image") content = "📷 Foto";
 
-        // Parse online status & unread count
-        const isOnline = onlineStatuses[index] === "true";
-        let unreadCount = parseInt(unreadCounts[index] || "0", 10);
-        if (unreadCount === 0 && lastMessage?.senderId === userId)
-          unreadCount = 0;
+      let time = "";
+      if (lastMessage?.createdAt) {
+        const created = dayjs(lastMessage.createdAt).tz(timezone);
+        if (created.isToday()) time = created.format("HH:mm");
+        else if (created.isYesterday()) time = "Kemarin";
+        else time = created.format("DD-MM-YYYY");
+      }
 
-        return {
-          id: chat.id,
-          userId: otherMembers[0]?.user?.id || null,
-          type: chat.type,
-          name: otherMembers[0]?.user?.username || "Unknown User",
-          image: otherMembers[0]?.user?.image || null,
-          lastMessage: lastMessage
-            ? {
-                content,
-                sender: lastMessage.sender?.username || "Unknown",
-                time,
-              }
-            : null,
-          unreadCount,
-          isOnline,
-        };
-      })
-      .filter(Boolean); // Remove null entries
+      // Parse online status & unread count
+      const isOnline = onlineStatuses[index] === "true";
+      let unreadCount = parseInt(unreadCounts[index] || "0", 10);
+      if (unreadCount === 0 && lastMessage?.senderId === userId)
+        unreadCount = 0;
+
+      return {
+        id: chat.id,
+        userId: otherMembers[0]?.user.id || null,
+        type: chat.type,
+        name: otherMembers[0]?.user.username || "Unknown User",
+        image: otherMembers[0]?.user.image || null,
+        lastMessage: lastMessage
+          ? {
+              content,
+              sender: lastMessage.sender.username,
+              time,
+            }
+          : null,
+        unreadCount,
+        isOnline,
+      };
+    });
 
     return res.status(200).json({
       success: true,
