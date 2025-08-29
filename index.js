@@ -13,6 +13,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
 import gameRouter from "./routes/gameRoute.js";
+import kkbdRouter from "./routes/kkbdRoute.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -55,6 +56,7 @@ app.use("/api/user", userRouter);
 app.use("/api/chat", chatRouter);
 app.use("/api/inbox", inboxRouter);
 app.use("/api/games", gameRouter);
+app.use("/api/kkbd", kkbdRouter);
 
 // Handle Update APK
 app.get("/updates", (req, res) => {
