@@ -84,7 +84,7 @@ const downloadApk = async (req, res) => {
 };
 
 const checkLatestVersion = (req, res) => {
-  const latestVersion = "v1.0.1";
+  const latestVersion = "v1.0.0";
   try {
     const { version } = req.body;
     if (version !== latestVersion) {
